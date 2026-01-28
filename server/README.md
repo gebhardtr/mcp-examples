@@ -39,16 +39,15 @@ The following diagram illustrates the architecture of the MCP Server:
 
 ```mermaid
 sequenceDiagram
-    box hsl(60, 80%, 95%) User Tenancy
-    participant Client
+    box User Tenancy
+        participant Client
     end
-    box hsl(60, 80%, 95%) Service Tenancy
-    participant MCP Server
-    participant IDCS
+    box Service Tenancy
+        participant MCP Server
+        participant IDCS
     end
-
-    box hsl(60, 80%, 95%) OCI
-    participant OCI APIs
+    box OCI
+        participant OCI APIs
     end
 
     Client->>MCP Server: Authentication Request
@@ -60,7 +59,7 @@ sequenceDiagram
     IDCS->>MCP Server: Token Validation Response
     MCP Server->>IDCS: Exchange Token for UPST
     IDCS->>MCP Server: UPST
-    MCP Server->>OCI APIs: Request with UPST (using Token Exchange Signer)
+    MCP Server->>OCI APIs: Request with UPST (Token Exchange Signer)
     OCI APIs->>MCP Server: Response
     MCP Server->>Client: Response
 ```
