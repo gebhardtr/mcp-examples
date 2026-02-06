@@ -17,10 +17,17 @@ ollama pull gpt-oss
 oci session authenticate --profile-name <profile name> --region <region name: us-sanjose-1>
 ```
 
+### Setup project
+```bash
+cd agent/app
+uv venv -p 3.13
+source .venv/bin/activate
+uv pip install -e .
+```
+
 
 ### Start LangGraph API server
 ```bash
-cd agent/app
 uv run langgraph dev --no-browser --allow-blocking
 ```
 
