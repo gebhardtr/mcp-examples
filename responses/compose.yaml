@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+  oci-cloud-mcp:
+    build:
+      context: /Users/rigebha/Workspace/mcp/src/oci-cloud-mcp-server
+      dockerfile: Containerfile
+    container_name: llama-stack-responses-oci-cloud-mcp
+    environment:
+      OCI_CONFIG_PROFILE: ${OCI_CONFIG_PROFILE:-DEFAULT}
+      ORACLE_MCP_HOST: 0.0.0.0
+      ORACLE_MCP_PORT: 8888
+    volumes:
+      - ${HOME}/.oci:/app/.oci:ro
+      - ${HOME}/.oci:/root/.oci:ro
+      - ${HOME}/.oci:/Users/rigebha/.oci:ro
+    ports:
+      - "8888:8888"
+
+  llama-stack:
+    build:
+      context: .
+      dockerfile: Containerfile.server
+    container_name: llama-stack-responses-llama-stack
+    secrets:
+      - openai_api_key
+    environment:
+      SQLITE_STORE_DIR: /app/.llama
+      FILES_STORAGE_DIR: /app/.llama/files
+    ports:
+      - "8321:8321"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8321/v1/models')"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+secrets:
+  openai_api_key:
+    external: true

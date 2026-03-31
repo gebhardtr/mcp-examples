@@ -1,0 +1,75 @@
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+    "llama-stack>=0.4.2" \
+    huggingface_hub \
+    requests \
+    psycopg2-binary \
+    sentencepiece \
+    "weaviate-client>=4.16.5" \
+    tree_sitter \
+    emoji \
+    qdrant-client \
+    anthropic \
+    faiss-cpu \
+    "mcp>=1.23.0" \
+    langdetect \
+    "nltk>=3.9.3" \
+    "datasets>=4.0.0" \
+    scipy \
+    pymongo \
+    autoevals \
+    aiosqlite \
+    pillow \
+    matplotlib \
+    scikit-learn \
+    "fireworks-ai<=0.17.16" \
+    aiohttp \
+    google-genai \
+    transformers \
+    pandas \
+    einops \
+    "pymilvus[milvus-lite]>=2.4.10" \
+    ollama \
+    numpy \
+    sqlite-vec \
+    "together>=2" \
+    chromadb-client \
+    "pypdf>=6.7.2" \
+    "fonttools>=4.60.2" \
+    safetensors \
+    redis \
+    tqdm \
+    asyncpg \
+    chardet \
+    tokenizers \
+    "h11>=0.16.0" \
+    "sqlalchemy[asyncio]" \
+    "elasticsearch>=8.16.0,<9.0.0" \
+    codeshield \
+    fastapi \
+    fire \
+    httpx \
+    uvicorn \
+    opentelemetry-sdk \
+    opentelemetry-exporter-otlp-proto-http \
+    torch \
+    torchvision \
+    "torchao>=0.12.0" \
+    "torchtune>=0.5.0" \
+    sentence-transformers
+
+COPY llama-stack-run.yaml /app/llama-stack-run.yaml
+COPY scripts/start-llama-stack.sh /app/start-llama-stack.sh
+
+RUN chmod +x /app/start-llama-stack.sh
+
+EXPOSE 8321
+
+CMD ["/app/start-llama-stack.sh"]
