@@ -1,0 +1,20 @@
+services:
+  a2ui:
+    build:
+      context: .
+      dockerfile: Containerfile
+    container_name: a2ui
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config/app-config.toml:/app/config/app-config.toml:ro
+      - ${HOME}/.oci:/home/nextjs/.oci:ro
+    environment:
+      A2UI_MODE: ${A2UI_MODE:-}
+    secrets:
+      - openai_api_key
+    restart: unless-stopped
+
+secrets:
+  openai_api_key:
+    external: true
