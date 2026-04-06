@@ -2,6 +2,7 @@ import {
   getDefaultCatalogRuntime,
   type A2UICatalogRuntime,
 } from "./catalogs/index.ts";
+import { validateA2UIMessageStream } from "./validate.ts";
 import type {
   A2UIAction,
   A2UIAppendix,
@@ -45,7 +46,7 @@ export function renderA2UIViewModel(
     components.push({
       id,
       component: {
-        [componentType]: properties,
+        [componentType]: pruneUndefined(properties),
       },
     });
     return id;
@@ -219,7 +220,7 @@ export function renderA2UIViewModel(
     },
   });
 
-  return [
+  const messages: A2UIMessage[] = [
     {
       surfaceUpdate: {
         surfaceId,
@@ -252,10 +253,12 @@ export function renderA2UIViewModel(
         surfaceId,
         root: rootId,
         catalogId: catalogRuntime.catalog.catalogId,
-        styles: catalogRuntime.catalog.theme,
       },
     },
   ];
+
+  validateA2UIMessageStream(messages, catalogRuntime);
+  return messages;
 }
 
 function renderStatus(
@@ -444,4 +447,10 @@ function encodeStringMap(entries: Record<string, string>): A2UIDataEntry[] {
     key,
     valueString: value,
   }));
+}
+
+function pruneUndefined<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  ) as T;
 }

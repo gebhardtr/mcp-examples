@@ -33,3 +33,10 @@ export type MCPToolPlan = {
   toolName?: string;
   arguments?: Record<string, unknown>;
 };
+
+export type MCPPlanningAttempt = {
+  plan: MCPToolPlan;
+  outcome: "succeeded" | "failed";
+  resultPreview?: string;
+  errorMessage?: string;
+};

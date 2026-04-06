@@ -50,7 +50,7 @@ export type A2UIViewModel = {
   actions?: A2UIAction[];
   appendix?: A2UIAppendix;
   meta: {
-    source: "mock" | "openai";
+    source: "mock" | "openai" | "server";
     model: string;
     generatedAt: string;
     fallbackReason?: string;

@@ -36,6 +36,9 @@ flowchart TD
     Service["A2UI service
     `src/lib/a2ui/service.ts`"]
 
+    Agent["Live agent loop
+    `src/lib/a2ui/agent.ts`"]
+
     Catalogs["Catalog registry + negotiation
     `src/lib/a2ui/catalogs`"]
 
@@ -45,14 +48,24 @@ flowchart TD
 
     Service -->|"mock mode"| Mock["Mock view model
     `src/lib/a2ui/mock.ts`"]
-    Service -->|"live mode"| OpenAI["OpenAI Responses
-    `src/lib/a2ui/openai.ts`"]
-    Service -->|"MCP enabled"| MCP["MCP client wrapper
+    Service -->|"live mode"| Agent
+
+    Agent --> Planner["Structured MCP planner
+    `requestMcpToolPlan(...)`
+    in `src/lib/a2ui/openai.ts`"]
+    Planner --> MCP["MCP client wrapper
     `src/lib/mcp/client.ts`"]
     MCP -->|"connects to"| OciMcp["Configured MCP servers
-    stdio or http"]
-    OciMcp --> OpenAI
-    OpenAI --> Normalize["View model normalizer
+    http sidecar by default in compose
+    stdio or http supported"]
+    OciMcp --> Agent
+
+    Agent --> OpenAI["Structured OpenAI Responses
+    `requestA2UIViewModel(...)`
+    in `src/lib/a2ui/openai.ts`"]
+    OpenAI --> Guard["Semantic retry guard
+    `src/lib/a2ui/semantic-guard.ts`"]
+    Guard --> Normalize["View model normalizer
     `src/lib/a2ui/normalize.ts`"]
 
     Mock --> ViewModel["Semantic view model
@@ -83,13 +96,16 @@ How the flow works:
 3. The service chooses either:
    - mock mode for offline development, or
    - a live OpenAI-compatible Responses call when `OPENAI_API_KEY` is configured.
-4. If MCP is configured, the server-side agent can list tools across multiple named servers, choose one tool call, fetch live data, and feed that result into the final A2UI generation step.
-5. Live model output is normalized into a constrained semantic view model before it reaches the wire.
-6. The server compiles that view model against the negotiated catalog, so component names can vary while the semantic model stays stable.
-7. The route returns newline-delimited JSON with the chosen `catalogId` in `beginRendering`.
-8. The workbench and `/render` page derive a lightweight stream summary for badges and metadata without materializing a second client-side surface tree.
-9. The response surface wrapper computes a replay plan, appends unseen suffix messages when possible, and resets only when the stream changes shape.
-10. The client hands the message stream to the official A2UI React provider and web-core processor, while this repo supplies the catalog-role component registry used for its custom presentation.
+4. In live mode, the server-side agent discovers tools across the configured MCP servers, asks the model for a structured tool plan, and can make multiple MCP calls before rendering.
+5. The planner and final semantic-output request both use structured Outputs API responses rather than free-form JSON text.
+6. If a grounded inventory-style result comes back without a usable table, the semantic retry guard asks the model for a corrected semantic response before the server gives up on the live path.
+7. Live model output is normalized into a constrained semantic view model before it reaches the wire.
+8. If the MCP-assisted live path fails for a grounded request, the service returns an explicit grounded-failure surface and records the failure in `meta.fallbackReason` instead of silently switching to a model-only answer.
+9. The server compiles that view model against the negotiated catalog, so component names can vary while the semantic model stays stable.
+10. The route returns newline-delimited JSON with the chosen `catalogId` in `beginRendering`.
+11. The workbench and `/render` page derive a lightweight stream summary for badges and metadata without materializing a second client-side surface tree.
+12. The response surface wrapper computes a replay plan, appends unseen suffix messages when possible, and resets only when the stream changes shape.
+13. The client hands the message stream to the official A2UI React provider and web-core processor, while this repo supplies the catalog-role component registry used for its custom presentation.
 
 ## Live Model Path
 
@@ -99,7 +115,10 @@ sequenceDiagram
     participant Route as Next Route Handler
     participant Service as A2UI Service
     participant Catalogs as Catalog Negotiation
-    participant API as OpenAI Responses API
+    participant Planner as OpenAI Planner
+    participant MCP as MCP Servers
+    participant API as OpenAI View Model
+    participant Guard as Semantic Guard
     participant Normalize as A2UI Normalizer
     participant Compile as A2UI Compiler
     participant Render as A2UI Renderer
@@ -107,8 +126,14 @@ sequenceDiagram
     Browser->>Route: POST /api/respond { prompt, a2uiClientCapabilities }
     Route->>Catalogs: negotiate catalog
     Route->>Service: generateA2UIMessageStream(prompt, catalog)
-    Service->>API: POST /v1/responses with schema instructions
-    API-->>Service: structured JSON-like model output
+    Service->>Planner: requestMcpToolPlan(...)
+    Planner-->>Service: structured tool plan
+    Service->>MCP: optional one-or-more MCP calls
+    MCP-->>Service: live OCI/tool result
+    Service->>API: requestA2UIViewModel(...)
+    API-->>Service: structured semantic view model
+    Service->>Guard: shouldRetrySemanticViewModel(...)
+    Guard-->>Service: retry / accept
     Service->>Normalize: normalizeA2UIViewModel(output, "openai", model)
     Normalize-->>Compile: semantic view model
     Catalogs->>Compile: selected catalog runtime
@@ -122,24 +147,39 @@ Notes:
 
 - The model is still not allowed to define the rendered UI directly.
 - The server owns semantic-to-catalog compilation. The model never emits raw component trees directly.
+- The live agent path is iterative: it can plan and execute multiple MCP calls before asking for the final semantic view model.
 - Catalog negotiation now follows A2UI practice: the client advertises support, the server selects one compatible catalog, and the chosen `catalogId` is returned in `beginRendering`.
 - Inline catalogs are supported when they declare the renderer roles needed by this app.
 - The official client runtime now owns message processing and tree materialization; this repo only owns catalog negotiation and the role-to-component registry.
 - Workbench and playground views only call `summarizeA2UIStream(...)` for metadata and status; they do not run a separate surface materialization pass.
 - The response surface wrapper is replay-aware: it appends new suffix messages to existing runtime state and only clears/replays when the incoming stream diverges from what was already processed.
+- The live path uses structured outputs for both the MCP planning step and the final semantic A2UI view model request.
+- Tool catalogs, prior attempts, and live MCP results are passed to the model as ordinary request context, not elevated into the system prompt.
+- Grounded inventory/list prompts can trigger one semantic retry if the first live semantic response omits the table that the app expects for repeated rows.
 - If the official processor rejects a parseable-but-invalid stream, the wrapper falls back to a warning surface instead of crashing the React render path.
 - The renderer registry resolves negotiated component names to local React components and degrades safely when a component type is not implemented locally.
-- If the live call fails, the service falls back to the mock generator and records the fallback reason in metadata.
+- If the MCP-assisted live path fails, the service returns an explicit grounded-failure surface and records the failure reason in metadata instead of silently falling back to a model-only answer.
 
 ## What it does
 
 The app accepts a user prompt, sends it to `POST /api/respond`, and renders an
 A2UI surface instead of plain text only. The server route supports two execution modes:
 
-- Mock mode: enabled by default when `OPENAI_API_KEY` is not set
-- Live mode: enabled automatically when `OPENAI_API_KEY` is set
+- Mock mode: enabled when `A2UI_MODE=mock`, or whenever `OPENAI_API_KEY` is not present outside the compose workflow
+- Live mode: enabled when the app has `OPENAI_API_KEY` and the `oci-mcp` sidecar is reachable
 
 ## Run
+
+Use the single Podman Compose workflow for now.
+
+Install and setup dependencies:
+```bash
+brew install podman
+brew install podman-compose
+
+podman machine init
+podman machine start
+```
 
 Create your local config file first:
 
@@ -147,9 +187,30 @@ Create your local config file first:
 cp config/app-config.template.toml config/app-config.toml
 ```
 
+If you use OCI session-based auth, refresh it locally before starting the stack so the `oci-mcp` sidecar can authenticate successfully:
+
 ```bash
-npm install
-npm run dev
+oci session auth
+```
+
+Create the external Podman secret the app reads at startup:
+
+```bash
+podman secret create --replace openai_api_key /path/to/secret-file
+```
+
+Start the stack:
+
+```bash
+podman compose up --build
+```
+
+This starts both the web app and the `oci-mcp` HTTP sidecar in the canonical two-container topology.
+
+If you want to keep the same compose topology but force mock mode:
+
+```bash
+A2UI_MODE=mock podman compose up --build
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
@@ -176,8 +237,11 @@ This repo is now catalog-aware.
 - The server negotiates the first compatible catalog in preference order
 - `beginRendering.catalogId` tells the client which renderer contract was used
 - Clients may also send inline catalogs for development or specialized renderers
+- `a2uiClientCapabilities.supportedCatalogIds` is required when client capabilities are provided
+- Inline catalogs follow the v0.8 shape: `catalogId`, `components`, and `styles`, with optional extra metadata such as `title` or `extendsCatalogId`
 - Inline catalogs may extend a built-in catalog with `extendsCatalogId` and only override the roles they change
 - `beginRendering.styles` is now limited to the v0.8 keys the official web runtime accepts: `font` and `primaryColor`
+- The compiler validates the emitted A2UI stream against the negotiated catalog before returning it
 
 The current implementation supports:
 
@@ -204,7 +268,8 @@ Example request body:
         "components": {
           "Panel": { "type": "object", "x-a2uiRole": "card" },
           "Copy": { "type": "object", "x-a2uiRole": "text" }
-        }
+        },
+        "styles": {}
       }
     ]
   }
@@ -213,14 +278,11 @@ Example request body:
 
 ## Configuration
 
-Runtime environment variables:
+Runtime secret handling:
 
-```bash
-OPENAI_API_KEY=<your-api-key>
-A2UI_MODE=mock
-```
-
-`A2UI_MODE=mock` forces the offline mock path even if an API key is present.
+- `compose.yaml` expects the external Podman secret named `openai_api_key`.
+- The container entrypoint reads `/run/secrets/openai_api_key` and exports it for the app at startup.
+- Live requests use a 30s OpenAI timeout by default (`A2UI_OPENAI_TIMEOUT_MS`) and a 15s MCP timeout by default (`A2UI_MCP_TIMEOUT_MS`).
 
 The app loads its non-secret runtime configuration from `config/app-config.toml`, with the checked-in template at `config/app-config.template.toml`.
 
@@ -232,16 +294,16 @@ model = "gpt-5.4"
 base_url = "https://api.openai.com/v1"
 
 [mcp]
-active_servers = ["oci_stdio", "oci_http"]
+active_servers = ["oci_http"]
 
 [mcp.servers.oci_stdio]
 transport = "stdio"
 command = "uvx"
-args = ["oracle.oci-cloud-mcp-server"]
+args = ["--from", "oracle-oci-cloud-mcp-server==1.1.2", "oracle.oci-cloud-mcp-server"]
 
 [mcp.servers.oci_http]
 transport = "http"
-url = "http://localhost:8888/mcp"
+url = "http://oci-mcp:8888/mcp"
 headers = {}
 ```
 
@@ -254,7 +316,10 @@ Notes:
 
 - The MCP client runs on the server side only. The browser never connects to MCP directly.
 - `stdio` requires the target executable to exist in the runtime environment.
-- The container image includes `python3`, `uv`, and `uvx` so you can run Python-based MCP servers through `uv` without building a custom app image first.
+- The compose workflow always starts an `oci-mcp` sidecar, and the default template points `oci_http` at that service over the internal compose network.
+- The MCP sidecar image ships with `oracle.oci-cloud-mcp-server` 1.1.2 preinstalled, so compose no longer depends on runtime package resolution to start the sidecar.
+- The `stdio` example pins the same OCI MCP package version via `uvx --from ...` for reproducibility.
+- The compose app container does not include the OCI MCP executable; the compose workflow is intended to use the HTTP sidecar by default.
 - The local config file is intentionally ignored by git. Commit only the template.
 - The app can define more than one MCP server and will aggregate tools across the configured `active_servers`.
 
@@ -265,59 +330,37 @@ Example `stdio` commands:
 command = "oracle.oci-cloud-mcp-server"
 args = []
 
-# Resolve and run via uvx
+# Resolve and run a pinned PyPI release via uvx
 command = "uvx"
-args = ["oracle.oci-cloud-mcp-server"]
+args = ["--from", "oracle-oci-cloud-mcp-server==1.1.2", "oracle.oci-cloud-mcp-server"]
 
 # Use uv to run an installed module or project command
 command = "uv"
 args = ["run", "oracle.oci-cloud-mcp-server"]
 ```
 
-## Container
+## Compose
 
-Build the image:
+The compose stack builds two images: [Containerfile.app](/Users/rigebha/Workspace/mcp-examples/a2ui/Containerfile.app) for the Next.js server and [Containerfile.mcp](/Users/rigebha/Workspace/mcp-examples/a2ui/Containerfile.mcp) for the `oci-mcp` sidecar. Both runtime images use [`container-registry.oracle.com/os/oraclelinux:10-slim`](https://container-registry.oracle.com/) as their base image.
 
-```bash
-podman build -t a2ui -f Containerfile .
-```
-
-Run in mock mode:
+Create the external Podman secret:
 
 ```bash
-podman run --rm -p 3000:3000 a2ui
+podman secret create --replace openai_api_key /path/to/secret-file
 ```
 
-Run with live OpenAI access:
-
-```bash
-podman run --rm -p 3000:3000 \
-  -v "$PWD/config/app-config.toml:/app/config/app-config.toml:ro" \
-  -e OPENAI_API_KEY=<your-api-key> \
-  a2ui
-```
-
-Run with a Podman secret named `openai_api_key`:
-
-```bash
-podman run --rm -p 3000:3000 \
-  -v "$PWD/config/app-config.toml:/app/config/app-config.toml:ro" \
-  --secret openai_api_key \
-  a2ui
-```
-
-The container entrypoint automatically reads `/run/secrets/openai_api_key` when `OPENAI_API_KEY` is not already set.
-
-The container serves the app on `http://localhost:3000`.
-
-### Compose
-
-This project also includes `compose.yaml` for Podman Compose.
-
-Start the app:
+Start the stack:
 
 ```bash
 podman compose up --build
+```
+
+This single compose file starts both `a2ui` and `oci-mcp`.
+
+If you want to force mock mode while keeping the same two-service topology:
+
+```bash
+A2UI_MODE=mock podman compose up --build
 ```
 
 Stop it:
@@ -326,20 +369,17 @@ Stop it:
 podman compose down
 ```
 
-The compose file expects an external Podman secret named `openai_api_key`.
+The app serves traffic on `http://localhost:3000`.
+
+The sidecar image pins `oracle-oci-cloud-mcp-server` to version `1.1.2` at build time.
 
 It also mounts:
 
 - your local `config/app-config.toml` into the container at `/app/config/app-config.toml`
-- your local `~/.oci` directory into the container user home at `/home/nextjs/.oci` when using OCI-backed MCP server profiles
+- your local `~/.oci` directory into the `oci-mcp` sidecar user home at `/home/nextjs/.oci`
+- your local `~/.oci` directory into the same absolute host path inside the `oci-mcp` sidecar so OCI configs with absolute `key_file` and `security_token_file` entries keep working
 
-The container user home is `/home/nextjs`, so standard OCI CLI lookup works without extra mounts. If your local OCI profile uses host-specific absolute paths for `key_file`, update it to use a home-relative path or mirror that file path inside the container.
-
-If you want to force offline mode with compose, override the environment:
-
-```bash
-A2UI_MODE=mock podman compose up --build
-```
+The sidecar user home is `/home/nextjs`, so standard OCI CLI lookup works without extra mounts. The compose stack also mirrors `${HOME}/.oci` to the same absolute path inside the sidecar for host configs that reference files like `${HOME}/.oci/sessions/...`.
 
 Edit `config/app-config.toml` to change the model or MCP server definitions.
 

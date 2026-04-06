@@ -25,6 +25,11 @@ export async function loadAppConfig(): Promise<AppConfig> {
     if (isMissingFile(error)) {
       return emptyConfig;
     }
+    if (isDirectory(error)) {
+      throw new Error(
+        `Expected ${APP_CONFIG_PATH} to be a TOML file, but found a directory. Replace it with a file, for example by copying config/app-config.template.toml.`,
+      );
+    }
     throw error;
   }
 }
@@ -130,6 +135,15 @@ function isMissingFile(error: unknown): boolean {
     error !== null &&
     "code" in error &&
     error.code === "ENOENT"
+  );
+}
+
+function isDirectory(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "EISDIR"
   );
 }
 

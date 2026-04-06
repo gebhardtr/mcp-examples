@@ -5,6 +5,5 @@
 config/app-config.toml
 node_modules
 npm-debug.log
-Containerfile
 README.md
 test

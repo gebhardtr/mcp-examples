@@ -9,8 +9,9 @@ import {
   type A2UICatalogDefinition,
   type A2UICatalogRuntime,
   type A2UIClientCapabilities,
-  type A2UIRenderStyles,
   type A2UIRendererRole,
+  type A2UICatalogSchema,
+  A2UIClientCapabilitiesError,
   CatalogNegotiationError,
 } from "./types.ts";
 
@@ -37,25 +38,38 @@ export function getDefaultCatalogRuntime(): A2UICatalogRuntime {
 }
 
 export function parseClientCapabilities(value: unknown): A2UIClientCapabilities | undefined {
-  if (!isRecord(value)) {
+  if (value === undefined || value === null) {
     return undefined;
+  }
+
+  if (!isRecord(value)) {
+    throw new A2UIClientCapabilitiesError(
+      "a2uiClientCapabilities must be an object when provided.",
+    );
   }
 
   const supportedCatalogIds = Array.isArray(value.supportedCatalogIds)
     ? value.supportedCatalogIds.flatMap((item) =>
         typeof item === "string" && item.trim() ? [item.trim()] : [],
       )
-    : undefined;
+    : [];
 
   const inlineCatalogs = Array.isArray(value.inlineCatalogs)
-    ? value.inlineCatalogs.flatMap((item) => {
+    ? value.inlineCatalogs.map((item, index) => {
         const catalog = parseInlineCatalog(item);
-        return catalog ? [catalog] : [];
+        if (!catalog) {
+          throw new A2UIClientCapabilitiesError(
+            `a2uiClientCapabilities.inlineCatalogs[${index}] is not a valid A2UI catalog definition.`,
+          );
+        }
+        return catalog;
       })
     : undefined;
 
-  if (!supportedCatalogIds?.length && !inlineCatalogs?.length) {
-    return undefined;
+  if (!supportedCatalogIds.length) {
+    throw new A2UIClientCapabilitiesError(
+      "a2uiClientCapabilities.supportedCatalogIds must contain at least one catalog ID.",
+    );
   }
 
   return {
@@ -89,13 +103,9 @@ export function negotiateCatalog(
       `No compatible A2UI catalog was negotiated. Client supported: ${supportedCatalogIds.join(", ")}`,
     );
   }
-
-  const firstInlineCatalog = capabilities.inlineCatalogs?.[0];
-  if (firstInlineCatalog) {
-    return buildCatalogRuntime(firstInlineCatalog, inlineCatalogs);
-  }
-
-  return getDefaultCatalogRuntime();
+  throw new CatalogNegotiationError(
+    "No supportedCatalogIds were provided for A2UI catalog negotiation.",
+  );
 }
 
 export function buildCatalogRuntime(
@@ -162,6 +172,7 @@ export const exampleInlinePanelCatalog: A2UICatalogDefinition = {
   ...panelCatalog,
   catalogId: "https://example.com/catalogs/inline-panel/v1/catalog.json",
   title: "Inline Panel Catalog",
+  styles: {},
 };
 
 export const availableCatalogChoices = [
@@ -223,13 +234,10 @@ function resolveCatalogDefinition(
       ...resolvedBaseCatalog.components,
       ...catalog.components,
     },
-    theme:
-      resolvedBaseCatalog.theme || catalog.theme
-        ? {
-            ...(resolvedBaseCatalog.theme ?? {}),
-            ...(catalog.theme ?? {}),
-          }
-        : undefined,
+    styles: {
+      ...(resolvedBaseCatalog.styles ?? {}),
+      ...(catalog.styles ?? {}),
+    },
   };
 }
 
@@ -239,74 +247,64 @@ function parseInlineCatalog(value: unknown): A2UICatalogDefinition | null {
   }
 
   const catalogId = typeof value.catalogId === "string" ? value.catalogId.trim() : "";
-  const title = typeof value.title === "string" ? value.title.trim() : "";
   const components = value.components;
+  const styles = value.styles;
 
-  if (!catalogId || !title || !isRecord(components)) {
+  if (!catalogId || !isRecord(components) || !isRecord(styles)) {
     return null;
   }
 
   const normalizedComponents: Record<string, A2UICatalogDefinition["components"][string]> = {};
   for (const [componentName, schema] of Object.entries(components)) {
-    if (!isRecord(schema)) {
+    const normalizedSchema = parseCatalogSchema(schema);
+    if (!normalizedSchema) {
       return null;
     }
+    normalizedComponents[componentName] = normalizedSchema;
+  }
 
-    const role = schema["x-a2uiRole"];
-    if (
-      role !== undefined &&
-      role !== "column" &&
-      role !== "row" &&
-      role !== "card" &&
-      role !== "text" &&
-      role !== "button" &&
-      role !== "divider"
-    ) {
+  const normalizedStyles: Record<string, A2UICatalogSchema> = {};
+  for (const [styleName, schema] of Object.entries(styles)) {
+    const normalizedSchema = parseCatalogSchema(schema);
+    if (!normalizedSchema) {
       return null;
     }
-
-    normalizedComponents[componentName] = {
-      type: typeof schema.type === "string" ? schema.type : undefined,
-      description:
-        typeof schema.description === "string" ? schema.description : undefined,
-      properties: isRecord(schema.properties) ? schema.properties : undefined,
-      required: Array.isArray(schema.required)
-        ? schema.required.flatMap((entry) =>
-            typeof entry === "string" ? [entry] : [],
-          )
-        : undefined,
-      "x-a2uiRole": role,
-    };
+    normalizedStyles[styleName] = normalizedSchema;
   }
 
   return {
     catalogId,
-    title,
+    title: typeof value.title === "string" ? value.title.trim() : undefined,
     description:
       typeof value.description === "string" ? value.description : undefined,
     extendsCatalogId:
       typeof value.extendsCatalogId === "string"
-        ? value.extendsCatalogId
+        ? value.extendsCatalogId.trim() || undefined
         : undefined,
     components: normalizedComponents,
-    theme: parseTheme(value.theme),
+    styles: normalizedStyles,
   };
 }
 
-function parseTheme(value: unknown): A2UIRenderStyles | undefined {
+function parseCatalogSchema(value: unknown): A2UICatalogSchema | null {
   if (!isRecord(value)) {
-    return undefined;
+    return null;
   }
 
-  const theme: A2UIRenderStyles = {};
-  if (typeof value.font === "string" && value.font.trim()) {
-    theme.font = value.font.trim();
-  }
-  if (typeof value.primaryColor === "string" && value.primaryColor.trim()) {
-    theme.primaryColor = value.primaryColor.trim();
+  const role = value["x-a2uiRole"];
+  if (
+    role !== undefined &&
+    role !== "column" &&
+    role !== "row" &&
+    role !== "card" &&
+    role !== "text" &&
+    role !== "button" &&
+    role !== "divider"
+  ) {
+    return null;
   }
 
-  return Object.keys(theme).length > 0 ? theme : undefined;
+  return { ...value };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -322,8 +320,9 @@ export {
 
 export type {
   A2UICatalogDefinition,
+  A2UICatalogSchema,
   A2UICatalogRuntime,
   A2UIClientCapabilities,
 };
 
-export { CatalogNegotiationError };
+export { A2UIClientCapabilitiesError, CatalogNegotiationError };

@@ -14,6 +14,7 @@
     "@a2ui/react": "^0.8.0",
     "@a2ui/web_core": "^0.8.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "ajv": "^8.18.0",
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

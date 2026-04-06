@@ -157,7 +157,9 @@ function parseSource(
   value: unknown,
   fallback: A2UIViewModel["meta"]["source"],
 ): A2UIViewModel["meta"]["source"] {
-  return value === "openai" || value === "mock" ? value : fallback;
+  return value === "openai" || value === "mock" || value === "server"
+    ? value
+    : fallback;
 }
 
 function parseSurfaceKind(value: unknown): A2UISurfaceKind | undefined {

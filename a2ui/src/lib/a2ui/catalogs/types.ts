@@ -6,30 +6,21 @@ export type A2UIRendererRole =
   | "button"
   | "divider";
 
-export type A2UICatalogComponentSchema = {
-  type?: string;
-  description?: string;
-  properties?: Record<string, unknown>;
-  required?: string[];
+export type A2UICatalogSchema = Record<string, unknown> & {
   "x-a2uiRole"?: A2UIRendererRole;
-};
-
-export type A2UIRenderStyles = {
-  font?: string;
-  primaryColor?: string;
 };
 
 export type A2UICatalogDefinition = {
   catalogId: string;
-  title: string;
+  title?: string;
   description?: string;
   extendsCatalogId?: string;
-  components: Record<string, A2UICatalogComponentSchema>;
-  theme?: A2UIRenderStyles;
+  components: Record<string, A2UICatalogSchema>;
+  styles: Record<string, A2UICatalogSchema>;
 };
 
 export type A2UIClientCapabilities = {
-  supportedCatalogIds?: string[];
+  supportedCatalogIds: string[];
   inlineCatalogs?: A2UICatalogDefinition[];
 };
 
@@ -40,3 +31,5 @@ export type A2UICatalogRuntime = {
 };
 
 export class CatalogNegotiationError extends Error {}
+
+export class A2UIClientCapabilitiesError extends Error {}

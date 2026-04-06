@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { A2uiMessageProcessor } from "@a2ui/web_core/data/model-processor";
 import {
+  A2UIClientCapabilitiesError,
   exampleInlinePanelCatalog,
   negotiateCatalog,
   PANEL_CATALOG_ID,
+  parseClientCapabilities,
   REPORTING_CATALOG_ID,
 } from "../src/lib/a2ui/catalogs/index.ts";
 import { renderA2UIViewModel } from "../src/lib/a2ui/compiler.ts";
@@ -16,6 +18,7 @@ import {
   serializeA2UIStream,
 } from "../src/lib/a2ui/protocol.ts";
 import { planA2UIReplay } from "../src/lib/a2ui/replay-plan.ts";
+import { buildGroundedFailureViewModel } from "../src/lib/a2ui/grounded-failure.ts";
 
 test("buildMockViewModel returns an incident-oriented semantic view", () => {
   const response = buildMockViewModel("Investigate a severe API latency incident.");
@@ -89,6 +92,7 @@ test("inline catalogs can extend a built-in catalog and override selected roles"
         "x-a2uiRole": "card" as const,
       },
     },
+    styles: {},
   };
   const runtime = negotiateCatalog({
     supportedCatalogIds: [inlineCatalog.catalogId, REPORTING_CATALOG_ID],
@@ -110,6 +114,106 @@ test("inline catalogs can extend a built-in catalog and override selected roles"
   assert.equal(runtime.roleComponents.card, "Panel");
   assert.equal(getComponentEntry(rootComponent!)?.componentType, "Column");
   assert.equal(getComponentEntry(headerComponent!)?.componentType, "Panel");
+});
+
+test("inline catalogs may use richer JSON Schema features in component definitions", () => {
+  const inlineCatalog = {
+    catalogId: "https://example.com/catalogs/reporting-rich-schema/v1/catalog.json",
+    extendsCatalogId: REPORTING_CATALOG_ID,
+    components: {
+      Text: {
+        type: "object",
+        additionalProperties: false,
+        required: ["text"],
+        properties: {
+          text: {
+            $ref: "#/$defs/boundString",
+          },
+          variant: {
+            type: "string",
+            minLength: 1,
+          },
+        },
+        $defs: {
+          boundString: {
+            type: "object",
+            additionalProperties: false,
+            minProperties: 1,
+            maxProperties: 2,
+            properties: {
+              literalString: {
+                type: "string",
+                minLength: 1,
+              },
+              path: {
+                type: "string",
+                minLength: 1,
+              },
+            },
+          },
+        },
+        "x-a2uiRole": "text" as const,
+      },
+    },
+    styles: {},
+  };
+
+  const runtime = negotiateCatalog({
+    supportedCatalogIds: [inlineCatalog.catalogId, REPORTING_CATALOG_ID],
+    inlineCatalogs: [inlineCatalog],
+  });
+
+  assert.doesNotThrow(() =>
+    renderA2UIViewModel(buildMockViewModel("Plan a production readiness review."), runtime),
+  );
+});
+
+test("client capabilities require supportedCatalogIds", () => {
+  assert.throws(
+    () => parseClientCapabilities({ inlineCatalogs: [exampleInlinePanelCatalog] }),
+    A2UIClientCapabilitiesError,
+  );
+});
+
+test("inline catalogs may omit title but must include styles", () => {
+  const capabilities = parseClientCapabilities({
+    supportedCatalogIds: ["https://example.com/catalogs/no-title/v1/catalog.json"],
+    inlineCatalogs: [
+      {
+        catalogId: "https://example.com/catalogs/no-title/v1/catalog.json",
+        components: {
+          Panel: {
+            type: "object",
+            properties: {
+              child: { type: "string" },
+            },
+            required: ["child"],
+            "x-a2uiRole": "card" as const,
+          },
+        },
+        styles: {},
+      },
+    ],
+  });
+
+  assert.equal(capabilities?.inlineCatalogs?.[0]?.catalogId, "https://example.com/catalogs/no-title/v1/catalog.json");
+  assert.equal(capabilities?.inlineCatalogs?.[0]?.title, undefined);
+});
+
+test("invalid inline catalogs are rejected instead of ignored", () => {
+  assert.throws(
+    () =>
+      parseClientCapabilities({
+        supportedCatalogIds: ["https://example.com/catalogs/bad/v1/catalog.json"],
+        inlineCatalogs: [
+          {
+            catalogId: "https://example.com/catalogs/bad/v1/catalog.json",
+            components: {},
+          },
+        ],
+      }),
+    A2UIClientCapabilitiesError,
+  );
 });
 
 test("official A2UI processor accepts the reporting catalog stream", () => {
@@ -179,6 +283,31 @@ test("replay planner resets when an earlier message changes", () => {
 
   assert.equal(replayPlan.reset, true);
   assert.deepEqual(replayPlan.messages, mutatedMessages);
+});
+
+test("grounded live failures render an explicit server failure surface", () => {
+  const messages = renderA2UIViewModel(
+    buildGroundedFailureViewModel(
+      "list all OCI regions",
+      new Error("oci-mcp unavailable"),
+    ),
+  );
+  const surface = materializeA2UISurface(messages);
+
+  assert.equal(surface.dataModel.meta?.source, "server");
+  assert.equal(surface.dataModel.meta?.model, "grounded-failure");
+  assert.equal(
+    surface.dataModel.text?.["page-title"],
+    "Grounded Content Unavailable",
+  );
+  assert.match(
+    String(surface.dataModel.text?.["status-body"] ?? ""),
+    /did not fall back to a model-only answer/i,
+  );
+  assert.match(
+    String(surface.dataModel.meta?.fallbackReason ?? ""),
+    /oci-mcp unavailable/i,
+  );
 });
 
 function findNode(node: { id: string; properties?: Record<string, unknown> } | null, id: string) {

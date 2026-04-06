@@ -7,15 +7,23 @@ import {
   createMcpClient,
 } from "@/lib/mcp/client";
 import type {
+  MCPPlanningAttempt,
   MCPServerDefinition,
   MCPToolDefinition,
   MCPToolExecution,
   MCPToolPlan,
 } from "@/lib/mcp/types";
 import {
+  buildSemanticRetryFeedback,
+  shouldRetrySemanticViewModel,
+} from "./semantic-guard";
+import {
   requestA2UIViewModel,
   requestMcpToolPlan,
 } from "./openai";
+
+const DEFAULT_MAX_TOOL_CALLS = 4;
+const DEFAULT_MAX_VIEW_MODEL_ATTEMPTS = 3;
 
 export async function generateAgentA2UIViewModel(
   prompt: string,
@@ -27,57 +35,122 @@ export async function generateAgentA2UIViewModel(
     return requestA2UIViewModel(prompt, undefined, appConfig);
   }
 
-  const sessions = await openServerSessions(serverDefinitions);
+  const { sessions, availabilityNotes } = await openServerSessions(serverDefinitions);
 
   try {
-    const discovery = await discoverTools(sessions);
-    const plan = await requestMcpToolPlan(
-      prompt,
-      discovery.tools,
-      discovery.instructions.join("\n\n"),
-      appConfig,
-    );
-
+    const discovery = await discoverTools(sessions, availabilityNotes);
+    const planningAttempts: MCPPlanningAttempt[] = [];
     let toolExecution: MCPToolExecution | undefined;
-    if (shouldUseTool(plan, discovery.tools)) {
-      const targetSession = sessions.find(
-        (session) => session.definition.name === plan.serverName,
+
+    for (let attempt = 0; attempt < DEFAULT_MAX_TOOL_CALLS; attempt += 1) {
+      const plan = await requestMcpToolPlan(
+        prompt,
+        discovery.tools,
+        {
+          serverInstructions: discovery.instructions.join("\n\n"),
+          previousAttempts: planningAttempts,
+          maxToolCalls: DEFAULT_MAX_TOOL_CALLS,
+        },
+        appConfig,
       );
 
-      if (!targetSession) {
-        throw new Error(
-          `Planned MCP server "${plan.serverName}" is not configured.`,
-        );
+      if (!shouldUseTool(plan, discovery.tools)) {
+        break;
       }
 
-      const resultText = await callMcpTool(
-        targetSession.client,
-        plan.toolName!,
-        plan.arguments ?? {},
-      );
-
-      toolExecution = {
-        serverName: targetSession.definition.name,
-        toolName: plan.toolName!,
-        arguments: plan.arguments ?? {},
-        resultText,
-      };
+      try {
+        toolExecution = await executePlannedTool(plan, sessions);
+        planningAttempts.push({
+          plan,
+          outcome: "succeeded",
+          resultPreview: summarizeToolResult(toolExecution.resultText),
+        });
+      } catch (error) {
+        planningAttempts.push({
+          plan,
+          outcome: "failed",
+          errorMessage:
+            error instanceof Error ? error.message : "Unknown MCP tool failure.",
+        });
+      }
     }
 
-    return requestA2UIViewModel(
-      prompt,
-      {
-        serverInstructions: discovery.instructions.join("\n\n"),
-        toolExecution,
-        availableTools: discovery.tools,
-      },
-      appConfig,
-    );
+    const serverInstructions = discovery.instructions.join("\n\n");
+    const retryFeedback = buildSemanticRetryFeedback(prompt, toolExecution);
+    let lastResult:
+      | Awaited<ReturnType<typeof requestA2UIViewModel>>
+      | undefined;
+
+    for (
+      let attempt = 0;
+      attempt < DEFAULT_MAX_VIEW_MODEL_ATTEMPTS;
+      attempt += 1
+    ) {
+      const result = await requestA2UIViewModel(
+        prompt,
+        {
+          serverInstructions:
+            attempt > 0 && retryFeedback
+              ? [serverInstructions, retryFeedback].filter(Boolean).join("\n\n")
+              : serverInstructions,
+          toolExecution,
+          availableTools: discovery.tools,
+        },
+        appConfig,
+      );
+
+      lastResult = result;
+
+      if (
+        !shouldRetrySemanticViewModel(
+          prompt,
+          toolExecution,
+          result.data,
+          result.model,
+        )
+      ) {
+        break;
+      }
+    }
+
+    if (!lastResult) {
+      throw new Error("The server could not produce a semantic view model.");
+    }
+
+    return lastResult;
   } finally {
     await Promise.all(
       sessions.map((session) => closeMcpClient(session.client, session.transport)),
     );
   }
+}
+
+async function executePlannedTool(
+  plan: MCPToolPlan,
+  sessions: ServerSession[],
+): Promise<MCPToolExecution> {
+  const targetSession = sessions.find(
+    (session) => session.definition.name === plan.serverName,
+  );
+
+  if (!targetSession || !plan.toolName) {
+    throw new Error(
+      `Planned MCP server "${plan.serverName}" is not configured.`,
+    );
+  }
+
+  const resultText = await callMcpTool(
+    targetSession.client,
+    plan.toolName,
+    plan.arguments ?? {},
+  );
+
+  return {
+    serverName: targetSession.definition.name,
+    toolName: plan.toolName,
+    arguments: plan.arguments ?? {},
+    resultText,
+  };
 }
 
 function shouldUseTool(
@@ -99,9 +172,17 @@ type ServerSession = {
   transport: Awaited<ReturnType<typeof createMcpClient>>["transport"];
 };
 
-async function discoverTools(sessions: ServerSession[]) {
+type OpenServerSessionsResult = {
+  sessions: ServerSession[];
+  availabilityNotes: string[];
+};
+
+async function discoverTools(
+  sessions: ServerSession[],
+  availabilityNotes: string[] = [],
+) {
   const tools: MCPToolDefinition[] = [];
-  const instructions: string[] = [];
+  const instructions: string[] = [...availabilityNotes];
 
   for (const session of sessions) {
     try {
@@ -133,15 +214,38 @@ async function discoverTools(sessions: ServerSession[]) {
 
 async function openServerSessions(
   serverDefinitions: AppConfig["mcp"]["servers"][string][],
-): Promise<ServerSession[]> {
-  const sessions = await Promise.all(
-    serverDefinitions.map(async (definition) => ({
-      definition,
-      ...(await createMcpClient(definition)),
-    })),
+): Promise<OpenServerSessionsResult> {
+  const results = await Promise.all(
+    serverDefinitions.map(async (definition) => {
+      try {
+        return {
+          kind: "connected" as const,
+          session: {
+            definition,
+            ...(await createMcpClient(definition)),
+          },
+        };
+      } catch (error) {
+        return {
+          kind: "failed" as const,
+          definition,
+          message:
+            error instanceof Error ? error.message : "unknown connection error",
+        };
+      }
+    }),
   );
 
-  return sessions;
+  return {
+    sessions: results.flatMap((result) =>
+      result.kind === "connected" ? [result.session] : [],
+    ),
+    availabilityNotes: results.flatMap((result) =>
+      result.kind === "failed"
+        ? [`${result.definition.name}: unavailable (${result.message})`]
+        : [],
+    ),
+  };
 }
 
 function resolveActiveServers(appConfig: AppConfig) {
@@ -155,4 +259,11 @@ function resolveActiveServers(appConfig: AppConfig) {
   return activeServerNames
     .map((serverName) => configuredServers[serverName])
     .filter(Boolean);
+}
+
+function summarizeToolResult(resultText: string) {
+  const compact = resultText.replace(/\s+/g, " ").trim();
+  return compact.length > 1200
+    ? `${compact.slice(0, 1197)}...`
+    : compact;
 }
