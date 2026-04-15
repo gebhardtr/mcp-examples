@@ -26,68 +26,81 @@ The implementation is organized as:
 ## Architecture
 
 ```mermaid
-flowchart TD
-    Browser["Browser UI
-    `src/components/a2ui-workbench.tsx`"]
+flowchart LR
+    subgraph Client["Client-side app"]
+        ClientApp["A2UI Workbench
+        A2UI React Runtime + Renderer Registry"]
+    end
 
-    Route["Next.js route
-    `src/app/api/respond/route.ts`"]
+    subgraph Server["Server-side app"]
+        ServerApp["Respond API Route
+        A2UI Orchestrator
+        Catalog Registry + Negotiation
+        Mock View Model Generator
+        Semantic View Model Normalizer
+        Semantic View Model
+        Catalog Compiler
+        Protocol + Replay Adapter"]
+    end
 
-    Service["A2UI service
-    `src/lib/a2ui/service.ts`"]
+    subgraph AgentLayer["Agent"]
+        Agent["Grounded Agent Loop
+        MCP Client
+        Semantic Retry Guard"]
+    end
 
-    Agent["Live agent loop
-    `src/lib/a2ui/agent.ts`"]
+    subgraph Model["LLM"]
+        LLM["Structured MCP Planner
+        Semantic View Model Generator"]
+    end
 
-    Catalogs["Catalog registry + negotiation
-    `src/lib/a2ui/catalogs`"]
+    subgraph McpServer["MCP server"]
+        OciMcp["Configured MCP Servers
+        OCI sidecar by default in compose
+        stdio or http supported"]
+    end
 
-    Browser -->|"POST /api/respond"| Route
-    Route --> Service
-    Route --> Catalogs
-
-    Service -->|"mock mode"| Mock["Mock view model
-    `src/lib/a2ui/mock.ts`"]
-    Service -->|"live mode"| Agent
-
-    Agent --> Planner["Structured MCP planner
-    `requestMcpToolPlan(...)`
-    in `src/lib/a2ui/openai.ts`"]
-    Planner --> MCP["MCP client wrapper
-    `src/lib/mcp/client.ts`"]
-    MCP -->|"connects to"| OciMcp["Configured MCP servers
-    http sidecar by default in compose
-    stdio or http supported"]
-    OciMcp --> Agent
-
-    Agent --> OpenAI["Structured OpenAI Responses
-    `requestA2UIViewModel(...)`
-    in `src/lib/a2ui/openai.ts`"]
-    OpenAI --> Guard["Semantic retry guard
-    `src/lib/a2ui/semantic-guard.ts`"]
-    Guard --> Normalize["View model normalizer
-    `src/lib/a2ui/normalize.ts`"]
-
-    Mock --> ViewModel["Semantic view model
-    `src/lib/a2ui/types.ts`"]
-    Normalize --> ViewModel
-
-    ViewModel --> Compile["A2UI compiler
-    `src/lib/a2ui/compiler.ts`"]
-    Catalogs --> Compile
-    Compile --> Stream["A2UI JSONL + negotiated catalog
-    `surfaceUpdate`
-    `dataModelUpdate`
-    `beginRendering`"]
-    Stream --> Protocol["Protocol helpers
-    `src/lib/a2ui/protocol.ts`
-    `src/lib/a2ui/replay-plan.ts`"]
-    Catalogs --> Render["Official A2UI React runtime
-    `@a2ui/react` + `@a2ui/web_core`
-    wrapped by `src/components/response-surface.tsx`"]
-    Protocol --> Render
-    Render --> Browser
+    ClientApp -->|"POST /api/respond"| ServerApp
+    ServerApp -->|"live mode"| Agent
+    Agent --> LLM
+    Agent -->|"connects to"| OciMcp
+    Agent --> ServerApp
+    ServerApp -->|"A2UI message stream"| ClientApp
 ```
+
+See [Live Model Path](#live-model-path) below for the detailed step-by-step request flow.
+
+Implementation map:
+
+Client-side app:
+
+- `A2UI Workbench`: `src/components/a2ui-workbench.tsx`
+- `A2UI React Runtime + Renderer Registry`: `@a2ui/react`, `@a2ui/web_core`, and `src/components/response-surface.tsx`
+
+Server-side app:
+
+- `Respond API Route`: `src/app/api/respond/route.ts`
+- `A2UI Orchestrator`: `src/lib/a2ui/service.ts`
+- `Catalog Registry + Negotiation`: `src/lib/a2ui/catalogs`
+- `Mock View Model Generator`: `src/lib/a2ui/mock.ts`
+- `Semantic View Model Normalizer`: `src/lib/a2ui/normalize.ts`
+- `Semantic View Model`: `src/lib/a2ui/types.ts`
+- `Catalog Compiler`: `src/lib/a2ui/compiler.ts`
+- `Protocol + Replay Adapter`: `src/lib/a2ui/protocol.ts` and `src/lib/a2ui/replay-plan.ts`
+
+Agent:
+
+- `Grounded Agent Loop`: `src/lib/a2ui/agent.ts`
+- `MCP Client`: `src/lib/mcp/client.ts`
+- `Semantic Retry Guard`: `src/lib/a2ui/semantic-guard.ts`
+
+LLM:
+
+- `Structured MCP Planner` and `Semantic View Model Generator`: `src/lib/a2ui/openai.ts`
+
+MCP server:
+
+- `Configured MCP Servers`: the OCI MCP sidecar in compose by default, with stdio or http supported by config
 
 How the flow works:
 
