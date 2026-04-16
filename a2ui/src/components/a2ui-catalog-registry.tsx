@@ -183,6 +183,49 @@ const roleRenderers: Record<
       </button>
     );
   }),
+  select: memo(function CatalogSelect({
+    node,
+    surfaceId,
+  }: A2UIComponentProps<AnyComponentNode>) {
+    const { getUniqueId, getValue, resolveString, setValue } = useA2UIComponent(
+      node,
+      surfaceId,
+    );
+    const props = readProperties(node);
+    const label = resolveBoundText(props.label, resolveString);
+    const placeholder = resolveBoundText(props.placeholder, resolveString);
+    const valuePath = readBoundPath(props.value);
+    const boundValue = valuePath ? getValue(valuePath) : null;
+    const currentValue =
+      typeof boundValue === "string"
+        ? boundValue
+        : resolveBoundText(props.value, resolveString) ?? "";
+    const options = readSelectOptions(props.options, resolveString);
+    const selectId = getUniqueId(node.id);
+
+    return (
+      <label className="a2ui-select-field" htmlFor={selectId} style={hostStyle(node)}>
+        {label ? <span className="a2ui-select-label">{label}</span> : null}
+        <select
+          id={selectId}
+          className="a2ui-select-input"
+          value={currentValue}
+          onChange={(event) => {
+            if (valuePath) {
+              setValue(valuePath, event.target.value);
+            }
+          }}
+        >
+          <option value="">{placeholder ?? "Select an option"}</option>
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }),
   divider: memo(function CatalogDivider({
     node,
   }: A2UIComponentProps<AnyComponentNode>) {
@@ -222,6 +265,47 @@ function readAction(value: unknown): Action | undefined {
   }
 
   return undefined;
+}
+
+function readBoundPath(value: unknown) {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "path" in value &&
+    typeof value.path === "string"
+  ) {
+    return value.path;
+  }
+
+  return undefined;
+}
+
+function readSelectOptions(
+  value: unknown,
+  resolveString: (value: StringValue | null | undefined) => string | null,
+) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    if (
+      typeof entry !== "object" ||
+      entry === null ||
+      !("value" in entry) ||
+      typeof entry.value !== "string" ||
+      !("label" in entry)
+    ) {
+      return [];
+    }
+
+    const label = resolveBoundText(entry.label, resolveString);
+    if (!label) {
+      return [];
+    }
+
+    return [{ label, value: entry.value }];
+  });
 }
 
 function readChildren(value: unknown) {

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { startTransition, useState } from "react";
+import type { A2UIClientEventMessage } from "@a2ui/react";
 import {
   availableCatalogChoices,
   exampleInlinePanelCatalog,
@@ -20,6 +21,8 @@ type Turn = {
   messages?: A2UIMessage[];
   summary?: A2UIStreamSummary;
   error?: string;
+  actionError?: string;
+  isActing?: boolean;
   inlineCatalogs?: A2UICatalogDefinition[];
 };
 
@@ -103,6 +106,73 @@ export function A2UIWorkbench({ starterPrompts }: A2UIWorkbenchProps) {
     }
   }
 
+  async function submitTurnAction(
+    turnId: string,
+    actionEndpoint: string,
+    message: A2UIClientEventMessage,
+  ) {
+    startTransition(() => {
+      setTurns((current) =>
+        current.map((turn) =>
+          turn.id === turnId
+            ? { ...turn, isActing: true, actionError: undefined }
+            : turn,
+        ),
+      );
+    });
+
+    try {
+      const response = await fetch(actionEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(message),
+      });
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(errorBody?.error ?? "Interactive action failed.");
+      }
+
+      const deltaMessages = parseA2UIStream(await response.text());
+
+      startTransition(() => {
+        setTurns((current) =>
+          current.map((turn) => {
+            if (turn.id !== turnId || !turn.messages) {
+              return turn;
+            }
+
+            const nextMessages = [...turn.messages, ...deltaMessages];
+            return {
+              ...turn,
+              isActing: false,
+              actionError: undefined,
+              messages: nextMessages,
+              summary: summarizeA2UIStream(nextMessages),
+            };
+          }),
+        );
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Interactive action failed.";
+
+      startTransition(() => {
+        setTurns((current) =>
+          current.map((turn) =>
+            turn.id === turnId
+              ? { ...turn, isActing: false, actionError: message }
+              : turn,
+          ),
+        );
+      });
+    }
+  }
+
   return (
     <main className="page-shell">
       <section className="hero fade-in">
@@ -161,6 +231,9 @@ export function A2UIWorkbench({ starterPrompts }: A2UIWorkbenchProps) {
                 <div className="button-group">
                   <Link href="/render" className="secondary-button">
                     Open A2UI renderer
+                  </Link>
+                  <Link href="/interactive" className="secondary-button">
+                    Open interactive example
                   </Link>
                   <button
                     className="secondary-button"
@@ -237,6 +310,8 @@ export function A2UIWorkbench({ starterPrompts }: A2UIWorkbenchProps) {
                       ? "Live model response"
                       : readMeta(turn.summary, "source") === "mock"
                         ? "Offline mock response"
+                        : readMeta(turn.summary, "source") === "server"
+                          ? "Grounded server response"
                         : "Waiting for response"}
                   </span>
                   {turn.summary?.catalogId ? (
@@ -257,11 +332,41 @@ export function A2UIWorkbench({ starterPrompts }: A2UIWorkbenchProps) {
                     </div>
                   </div>
                 ) : turn.messages ? (
-                  <ResponseSurface
-                    messages={turn.messages}
-                    inlineCatalogs={turn.inlineCatalogs}
-                    surfaceId={turn.summary?.surfaceId}
-                  />
+                  <>
+                    {turn.actionError ? (
+                      <div className="surface">
+                        <div className="block callout-warning">
+                          <h3>Interaction failed</h3>
+                          <p className="section-copy">{turn.actionError}</p>
+                        </div>
+                      </div>
+                    ) : null}
+                    {turn.isActing ? (
+                      <div className="surface">
+                        <div className="block callout-info">
+                          <h3>Sending user action</h3>
+                          <p className="section-copy">
+                            Waiting for the server to apply the interaction.
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
+                    <ResponseSurface
+                      messages={turn.messages}
+                      inlineCatalogs={turn.inlineCatalogs}
+                      surfaceId={turn.summary?.surfaceId}
+                      onAction={
+                        readMetaValue(turn.summary, "actionEndpoint")
+                          ? (message) =>
+                              void submitTurnAction(
+                                turn.id,
+                                readMetaValue(turn.summary, "actionEndpoint"),
+                                message,
+                              )
+                          : undefined
+                      }
+                    />
+                  </>
                 ) : (
                   <div className="surface">
                     <div className="block">
@@ -283,6 +388,13 @@ export function A2UIWorkbench({ starterPrompts }: A2UIWorkbenchProps) {
 function readMeta(
   summary: A2UIStreamSummary | undefined,
   key: "source" | "model" | "generatedAt",
+) {
+  return summary?.meta[key] !== undefined ? String(summary.meta[key] ?? "") : "";
+}
+
+function readMetaValue(
+  summary: A2UIStreamSummary | undefined,
+  key: string,
 ) {
   return summary?.meta[key] !== undefined ? String(summary.meta[key] ?? "") : "";
 }

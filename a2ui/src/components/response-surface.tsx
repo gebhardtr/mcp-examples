@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   A2UIProvider,
   A2UIRenderer,
+  type OnActionCallback,
   useA2UI,
 } from "@a2ui/react";
 import {
@@ -21,12 +22,14 @@ type ResponseSurfaceProps = {
   messages: A2UIMessage[];
   inlineCatalogs?: A2UICatalogDefinition[];
   surfaceId?: string;
+  onAction?: OnActionCallback;
 };
 
 export function ResponseSurface({
   messages,
   inlineCatalogs = [],
   surfaceId,
+  onAction,
 }: ResponseSurfaceProps) {
   const registryResult = useMemo(() => {
     try {
@@ -69,7 +72,7 @@ export function ResponseSurface({
 
   return (
     <CatalogRegistryProvider registry={registry}>
-      <A2UIProvider>
+      <A2UIProvider onAction={onAction}>
         <ProcessedSurface
           messages={messages}
           surfaceId={resolvedSurfaceId}

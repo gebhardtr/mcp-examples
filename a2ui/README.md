@@ -181,6 +181,76 @@ A2UI surface instead of plain text only. The server route supports two execution
 - Mock mode: enabled when `A2UI_MODE=mock`, or whenever `OPENAI_API_KEY` is not present outside the compose workflow
 - Live mode: enabled when the app has `OPENAI_API_KEY` and the `oci-mcp` sidecar is reachable
 
+## Quick Demo Prompts
+
+Use these prompts to exercise the main demo flows quickly.
+
+| Prompt | Mode | Expected result |
+| --- | --- | --- |
+| `change my current region` | Live MCP-backed | Grounded interactive region selector with a live OCI region dropdown and a same-surface `userAction` round trip |
+| `list all OCI regions` | Live MCP-backed | Grounded reporting surface with OCI region metrics and a table of live regions |
+| `Plan a production readiness review for a new MCP-backed application.` | Mock or live | Reporting-style ops console with summary cards, metrics, checklist items, and supporting actions |
+| `Summarize an incident triage flow for an API latency spike.` | Mock or live | Incident-oriented response surface with status, steps, and operational guidance |
+| `Turn a cloud cost review into an actionable UI with metrics and next steps.` | Mock or live | Action-oriented planning surface with metrics, recommendations, and follow-up actions |
+
+Notes:
+
+- The OCI prompts above are grounded flows. They work best when the compose stack is running, `oci-mcp` is healthy, and your OCI auth is current via `oci session auth`.
+- If you want a minimal, protocol-focused interaction demo without the full MCP path, use [/interactive](/Users/rigebha/Workspace/mcp-examples/a2ui/src/app/interactive/page.tsx).
+
+## Interactive Example
+
+The repo also includes a canonical interaction example at `/interactive`.
+
+It demonstrates the A2UI data-flow pattern for user interaction:
+
+1. The server returns an initial A2UI surface with a bound `TextField` and `Button`.
+2. The user types into the field on the client.
+3. Clicking the button emits a `userAction` event with resolved `action.context`.
+4. The server responds with delta `dataModelUpdate` messages for the same surface.
+
+Top-level system boundaries involved in this flow:
+
+- `Client-side app`: the `/interactive` page, `A2UIInteractiveExample`, and `ResponseSurface`
+- `Server-side app`: `POST /api/examples/interactive` and the message builders in `src/lib/a2ui/interactive-example.ts`
+- `Agent`, `LLM`, and `MCP server`: part of the overall app architecture, but bypassed by this minimal interaction example
+
+```mermaid
+sequenceDiagram
+    participant Browser as "Browser UI"
+    participant Client as "Client-side app
+    A2UIInteractiveExample + ResponseSurface"
+    participant Route as "Server-side app
+    /api/examples/interactive"
+    participant Server as "Server-side app
+    interactive-example.ts builders"
+    participant Agent as "Agent
+    grounded agent loop"
+    participant LLM as "LLM
+    planner + semantic view model"
+    participant MCP as "MCP server
+    OCI sidecar or other MCP backend"
+
+    Note over Agent,MCP: Present in the overall system, but not used by /interactive
+
+    Browser->>Route: GET /interactive
+    Route-->>Browser: initial page shell
+    Browser->>Route: POST initial request
+    Route->>Server: build initial A2UI surface
+    Server-->>Route: surfaceUpdate + dataModelUpdate + beginRendering
+    Route-->>Client: initial A2UI message stream
+    Client-->>Browser: render input + button
+    Browser->>Client: type into bound input
+    Browser->>Client: click button
+    Client->>Route: POST userAction with resolved action.context
+    Route->>Server: build delta updates for same surface
+    Server-->>Route: dataModelUpdate delta
+    Route-->>Client: delta A2UI message stream
+    Client-->>Browser: update rendered surface in place
+```
+
+Use it to inspect the minimal round-trip for interactive A2UI without the full MCP-backed prompt flow.
+
 ## Run
 
 Use the single Podman Compose workflow for now.

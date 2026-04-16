@@ -22,6 +22,26 @@ export type A2UIAction = {
   description: string;
 };
 
+export type A2UISelectionOption = {
+  label: string;
+  value: string;
+  detail?: string;
+};
+
+export type A2UISelection = {
+  title: string;
+  body: string;
+  label: string;
+  placeholder?: string;
+  options: A2UISelectionOption[];
+  submitLabel: string;
+  actionName: string;
+  actionEndpoint: string;
+  actionContextKey: string;
+  resultTitle?: string;
+  resultMessage?: string;
+};
+
 export type A2UIAppendix = {
   title: string;
   body: string;
@@ -46,6 +66,7 @@ export type A2UIViewModel = {
   checklistTitle?: string;
   checklist?: A2UIChecklistItem[];
   table?: A2UITable;
+  selection?: A2UISelection;
   actionsTitle?: string;
   actions?: A2UIAction[];
   appendix?: A2UIAppendix;

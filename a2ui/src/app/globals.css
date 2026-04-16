@@ -106,6 +106,53 @@ input {
   line-height: 1.7;
 }
 
+.interactive-hero {
+  display: grid;
+  gap: 22px;
+}
+
+.interactive-flow-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.interactive-flow-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid rgba(53, 92, 125, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--text);
+}
+
+.interactive-flow-chip strong {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(162, 74, 47, 0.12);
+  color: var(--accent-strong);
+  font-size: 0.85rem;
+}
+
+.interactive-flow-chip span {
+  font-size: 0.94rem;
+  font-weight: 700;
+}
+
+.interactive-flow-arrow {
+  color: var(--muted);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
 .grid {
   display: grid;
   grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
@@ -139,6 +186,110 @@ input {
   margin: 0;
   color: var(--muted);
   line-height: 1.6;
+}
+
+.interactive-step-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.interactive-step-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid rgba(53, 92, 125, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.interactive-step-label {
+  color: var(--info);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.interactive-step-card strong {
+  font-size: 1rem;
+}
+
+.interactive-step-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.interactive-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.interactive-demo-controls {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.interactive-demo-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.interactive-demo-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(53, 92, 125, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.interactive-demo-chip:hover {
+  transform: translateY(-1px);
+  border-color: rgba(162, 74, 47, 0.26);
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.interactive-demo-chip:disabled {
+  cursor: wait;
+  opacity: 0.7;
+  transform: none;
+}
+
+.interactive-metric-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(245, 237, 223, 0.94));
+  border: 1px solid rgba(76, 54, 37, 0.08);
+}
+
+.interactive-metric-label {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.interactive-metric-card strong {
+  font-size: 1.6rem;
+  line-height: 1;
 }
 
 .prompt-list {
@@ -318,6 +469,45 @@ input {
   padding: 20px;
 }
 
+.interactive-inspector {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 20px 20px 0;
+}
+
+.interactive-inspector-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(243, 235, 222, 0.88));
+}
+
+.interactive-inspector-label {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.interactive-json-block {
+  margin: 0;
+  min-height: 144px;
+  overflow-x: auto;
+  border-radius: 14px;
+  background: #241d18;
+  color: #f7efe3;
+  padding: 14px;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .a2ui-surface .a2ui-column,
 .a2ui-surface .a2ui-table,
 .a2ui-surface .a2ui-item-card {
@@ -334,6 +524,33 @@ input {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+}
+
+.a2ui-select-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.a2ui-select-label {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.a2ui-select-input {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 0 14px;
+  color: var(--text);
+}
+
+.a2ui-select-input:focus {
+  outline: 2px solid rgba(162, 74, 47, 0.18);
+  border-color: rgba(162, 74, 47, 0.28);
 }
 
 .surface-summary {
@@ -571,6 +788,11 @@ input {
   .metric-grid {
     grid-template-columns: 1fr;
   }
+
+  .interactive-metrics,
+  .interactive-inspector {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {
@@ -583,7 +805,8 @@ input {
   .hero,
   .panel-inner,
   .surface,
-  .user-turn {
+  .user-turn,
+  .interactive-inspector {
     padding-left: 16px;
     padding-right: 16px;
   }

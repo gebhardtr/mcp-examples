@@ -4,6 +4,7 @@ export type A2UIRendererRole =
   | "card"
   | "text"
   | "button"
+  | "select"
   | "divider";
 
 export type A2UICatalogSchema = Record<string, unknown> & {

@@ -32,7 +32,11 @@ export async function generateAgentA2UIViewModel(
   const serverDefinitions = resolveActiveServers(appConfig);
 
   if (serverDefinitions.length === 0) {
-    return requestA2UIViewModel(prompt, undefined, appConfig);
+    const result = await requestA2UIViewModel(prompt, undefined, appConfig);
+    return {
+      ...result,
+      toolExecution: undefined,
+    };
   }
 
   const { sessions, availabilityNotes } = await openServerSessions(serverDefinitions);
@@ -117,7 +121,10 @@ export async function generateAgentA2UIViewModel(
       throw new Error("The server could not produce a semantic view model.");
     }
 
-    return lastResult;
+    return {
+      ...lastResult,
+      toolExecution,
+    };
   } finally {
     await Promise.all(
       sessions.map((session) => closeMcpClient(session.client, session.transport)),

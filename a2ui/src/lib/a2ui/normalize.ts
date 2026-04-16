@@ -3,6 +3,8 @@ import type {
   A2UIAppendix,
   A2UIChecklistItem,
   A2UIMetric,
+  A2UISelection,
+  A2UISelectionOption,
   A2UISurfaceKind,
   A2UITable,
   A2UIViewModel,
@@ -39,6 +41,7 @@ export function normalizeA2UIViewModel(
         })
       : [],
     table: normalizeTable(record.table),
+    selection: normalizeSelection(record.selection),
     actionsTitle: asOptionalString(record.actionsTitle) ?? "Actions",
     actions: Array.isArray(record.actions)
       ? record.actions.flatMap((item) => {
@@ -126,6 +129,49 @@ function normalizeAction(value: unknown): A2UIAction | null {
   return {
     label: asString(value.label, "Action"),
     description: asString(value.description, ""),
+  };
+}
+
+function normalizeSelection(value: unknown): A2UISelection | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const options = Array.isArray(value.options)
+    ? value.options.flatMap((item) => {
+        const normalized = normalizeSelectionOption(item);
+        return normalized ? [normalized] : [];
+      })
+    : [];
+
+  if (options.length === 0) {
+    return undefined;
+  }
+
+  return {
+    title: asString(value.title, "Selection"),
+    body: asString(value.body, ""),
+    label: asString(value.label, "Choose an option"),
+    placeholder: asOptionalString(value.placeholder),
+    options,
+    submitLabel: asString(value.submitLabel, "Submit"),
+    actionName: asString(value.actionName, "submitSelection"),
+    actionEndpoint: asString(value.actionEndpoint, "/api/actions/selection"),
+    actionContextKey: asString(value.actionContextKey, "selectionValue"),
+    resultTitle: asOptionalString(value.resultTitle),
+    resultMessage: asOptionalString(value.resultMessage),
+  };
+}
+
+function normalizeSelectionOption(value: unknown): A2UISelectionOption | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  return {
+    label: asString(value.label, "Option"),
+    value: asString(value.value, ""),
+    detail: asOptionalString(value.detail),
   };
 }
 

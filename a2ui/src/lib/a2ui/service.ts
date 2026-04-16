@@ -6,6 +6,11 @@ import { buildGroundedFailureViewModel } from "./grounded-failure.ts";
 import { buildMockViewModel } from "./mock.ts";
 import { normalizeA2UIViewModel } from "./normalize.ts";
 import type { A2UIMessage } from "./protocol.ts";
+import {
+  buildRegionSelection,
+  buildRegionSelectionFailure,
+  isRegionChangePrompt,
+} from "./region-selector.ts";
 
 type GenerateA2UIOptions = {
   clientCapabilities?: A2UIClientCapabilities;
@@ -25,8 +30,26 @@ export async function generateA2UIMessageStream(
 
   try {
     const result = await generateAgentA2UIViewModel(prompt, appConfig);
+    const normalized = normalizeA2UIViewModel(result.data, "openai", result.model);
+
+    if (isRegionChangePrompt(prompt)) {
+      const selection = buildRegionSelection(result.toolExecution);
+
+      if (!selection) {
+        return renderA2UIViewModel(
+          buildGroundedFailureViewModel(
+            prompt,
+            buildRegionSelectionFailure(result.toolExecution),
+          ),
+          catalogRuntime,
+        );
+      }
+
+      normalized.selection = selection;
+    }
+
     return renderA2UIViewModel(
-      normalizeA2UIViewModel(result.data, "openai", result.model),
+      normalized,
       catalogRuntime,
     );
   } catch (error) {

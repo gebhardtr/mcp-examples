@@ -30,6 +30,14 @@ export type A2UIComponentProperties = {
   primary?: boolean;
   action?: {
     name: string;
+    context?: Array<{
+      key: string;
+      value:
+        | { path: string }
+        | { literalString: string }
+        | { literalNumber: number }
+        | { literalBoolean: boolean };
+    }>;
   };
   axis?: "horizontal" | "vertical";
   [key: string]: unknown;

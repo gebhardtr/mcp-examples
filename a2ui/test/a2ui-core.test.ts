@@ -19,6 +19,15 @@ import {
 } from "../src/lib/a2ui/protocol.ts";
 import { planA2UIReplay } from "../src/lib/a2ui/replay-plan.ts";
 import { buildGroundedFailureViewModel } from "../src/lib/a2ui/grounded-failure.ts";
+import {
+  buildInteractiveExampleActionMessages,
+  buildInteractiveExampleInitialMessages,
+} from "../src/lib/a2ui/interactive-example.ts";
+import {
+  buildRegionSelection,
+  buildRegionSelectorActionMessages,
+  isRegionChangePrompt,
+} from "../src/lib/a2ui/region-selector.ts";
 
 test("buildMockViewModel returns an incident-oriented semantic view", () => {
   const response = buildMockViewModel("Investigate a severe API latency incident.");
@@ -308,6 +317,149 @@ test("grounded live failures render an explicit server failure surface", () => {
     String(surface.dataModel.meta?.fallbackReason ?? ""),
     /oci-mcp unavailable/i,
   );
+});
+
+test("interactive example renders a text field and a button", () => {
+  const messages = buildInteractiveExampleInitialMessages();
+  const surface = materializeA2UISurface(messages);
+
+  assert.equal(surface.root, "root");
+  assert.equal(
+    getComponentEntry(surface.components["name-field"])?.componentType,
+    "TextField",
+  );
+  assert.equal(
+    getComponentEntry(surface.components["submit-button"])?.componentType,
+    "Button",
+  );
+  assert.equal(surface.dataModel.draft?.name, "");
+});
+
+test("interactive example userAction returns data updates for the same surface", () => {
+  const initialMessages = buildInteractiveExampleInitialMessages();
+  const deltaMessages = buildInteractiveExampleActionMessages({
+    userAction: {
+      name: "submitGreeting",
+      surfaceId: "interactive-demo",
+      sourceComponentId: "submit-button",
+      timestamp: "2026-04-15T12:00:00.000Z",
+      context: {
+        name: "A2UI",
+      },
+    },
+  });
+  const surface = materializeA2UISurface([...initialMessages, ...deltaMessages]);
+
+  assert.match(
+    String(surface.dataModel.result?.message ?? ""),
+    /Hello, A2UI/i,
+  );
+  assert.equal(surface.dataModel.result?.lastSubmittedAt, "2026-04-15T12:00:00.000Z");
+  assert.equal(surface.dataModel.draft?.name, "");
+});
+
+test("renderA2UIViewModel renders a semantic selection as interactive A2UI", () => {
+  const messages = renderA2UIViewModel({
+    surfaceKind: "ops_console",
+    title: "Change Current OCI Region",
+    summary: "Select a grounded region from the live catalog.",
+    status: undefined,
+    metrics: [],
+    checklistTitle: undefined,
+    checklist: [],
+    table: undefined,
+    selection: {
+      title: "Region selector",
+      body: "Choose a region.",
+      label: "OCI region",
+      placeholder: "Choose a region",
+      options: [
+        { label: "us-ashburn-1 (IAD)", value: "IAD::us-ashburn-1" },
+        { label: "us-phoenix-1 (PHX)", value: "PHX::us-phoenix-1" },
+      ],
+      submitLabel: "Apply region selection",
+      actionName: "submitRegionSelection",
+      actionEndpoint: "/api/actions/region-selector",
+      actionContextKey: "regionValue",
+      resultTitle: "Server result",
+      resultMessage: "Waiting for a selection.",
+    },
+    actionsTitle: undefined,
+    actions: [],
+    appendix: undefined,
+    meta: {
+      source: "server",
+      model: "test",
+      generatedAt: "2026-04-16T00:00:00.000Z",
+    },
+  });
+  const surface = materializeA2UISurface(messages);
+
+  assert.equal(
+    getComponentEntry(surface.components["selection-input"])?.componentType,
+    "SelectField",
+  );
+  assert.equal(
+    getComponentEntry(surface.components["selection-submit-button"])?.componentType,
+    "Button",
+  );
+  assert.equal(surface.dataModel.meta?.actionEndpoint, "/api/actions/region-selector");
+  assert.equal(surface.dataModel.draft?.selectedOptionValue, "");
+  assert.equal(surface.dataModel.result?.message, "Waiting for a selection.");
+});
+
+test("region change prompts are recognized for the grounded selector flow", () => {
+  assert.equal(isRegionChangePrompt("change my current region"), true);
+  assert.equal(isRegionChangePrompt("switch region for this session"), true);
+  assert.equal(isRegionChangePrompt("list all OCI regions"), false);
+});
+
+test("region tool output becomes a grounded selection model", () => {
+  const selection = buildRegionSelection({
+    serverName: "oci_http",
+    toolName: "invoke_oci_api",
+    arguments: {
+      client_fqn: "oci.identity.IdentityClient",
+      operation: "list_regions",
+      params: {},
+    },
+    resultText: JSON.stringify({
+      client: "oci.identity.IdentityClient",
+      operation: "list_regions",
+      data: [
+        { key: "IAD", name: "us-ashburn-1" },
+        { key: "PHX", name: "us-phoenix-1" },
+      ],
+    }),
+  });
+
+  assert.ok(selection);
+  assert.equal(selection?.options.length, 2);
+  assert.equal(selection?.options[0]?.value, "IAD::us-ashburn-1");
+  assert.equal(selection?.actionEndpoint, "/api/actions/region-selector");
+});
+
+test("region selector action returns a same-surface data update", () => {
+  const messages = buildRegionSelectorActionMessages({
+    userAction: {
+      name: "submitRegionSelection",
+      surfaceId: "main",
+      sourceComponentId: "submit-button",
+      timestamp: "2026-04-15T14:00:00.000Z",
+      context: {
+        regionValue: "IAD::us-ashburn-1",
+      },
+    },
+  });
+  const surface = materializeA2UISurface(messages);
+
+  assert.match(
+    String(surface.dataModel.result?.message ?? ""),
+    /us-ashburn-1/i,
+  );
+  assert.equal(surface.surfaceId, "main");
+  assert.equal(surface.dataModel.result?.selectedRegionKey, "IAD");
+  assert.equal(surface.dataModel.result?.submittedAt, "2026-04-15T14:00:00.000Z");
 });
 
 function findNode(node: { id: string; properties?: Record<string, unknown> } | null, id: string) {

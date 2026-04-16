@@ -260,6 +260,7 @@ function extractRefusal(payload: Record<string, unknown>): string | undefined {
 function buildA2UISystemPrompt(prompt: string): string {
   const parts = [A2UI_SCHEMA_DESCRIPTION.trim()];
   const inventoryLikePrompt = isInventoryLikePrompt(prompt);
+  const selectionLikePrompt = isSelectionLikePrompt(prompt);
 
   parts.push(
     [
@@ -288,6 +289,16 @@ function buildA2UISystemPrompt(prompt: string): string {
       [
         "Favor concise, operator-usable content.",
         "Use grounded tool data when it is available.",
+      ].join("\n"),
+    );
+  }
+
+  if (selectionLikePrompt) {
+    parts.push(
+      [
+        "The user is asking to choose or change a grounded target.",
+        "When live MCP output provides a bounded set of options to choose from, return a non-null selection section with operator-usable labels and exact grounded values.",
+        "Keep any table as supporting context rather than the only interactive affordance.",
       ].join("\n"),
     );
   }
@@ -368,6 +379,7 @@ function buildMcpPlannerSystemPrompt(
     "Keep working until the user's goal is accomplished or you determine that no further useful MCP call remains.",
     "If a tool call fails, choose a revised tool or updated arguments on the next attempt instead of repeating the same failing request unchanged.",
     "Prefer grounded MCP data over model-only knowledge for OCI inventory, lookup, and listing prompts whenever a plausible tool path exists.",
+    "For prompts about changing, selecting, or switching the current OCI region, obtain the live region catalog from MCP before stopping.",
     "This OCI MCP server uses OCI Python SDK concepts. Expect fully qualified client classes like oci.identity.IdentityClient, snake_case operations like list_regions or list_instances, and params that match OCI Python SDK keyword arguments.",
     "When the server exposes generic wrapper tools such as list_client_operations or invoke_oci_api, use them as OCI SDK discovery and execution steps.",
     "Do not stop after a capability-discovery call unless the user explicitly asked about tool capabilities. Keep going until you have user-relevant data or you exhaust the available path.",
@@ -475,6 +487,13 @@ function isInventoryLikePrompt(prompt: string) {
   return /\b(list|show|enumerate|catalog|inventory|lookup|display)\b/.test(
     normalized,
   );
+}
+
+function isSelectionLikePrompt(prompt: string) {
+  const normalized = prompt.trim().toLowerCase();
+
+  return /\b(change|switch|set|update|select|choose)\b/.test(normalized) &&
+    /\b(region|target|choice|option)\b/.test(normalized);
 }
 
 function parsePlanArguments(value: string): Record<string, unknown> | undefined {

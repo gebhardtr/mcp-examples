@@ -211,6 +211,32 @@ const baseButtonSchema: A2UICatalogSchema = {
   "x-a2uiRole": "button",
 };
 
+const baseSelectSchema: A2UICatalogSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    label: BOUND_STRING_SCHEMA,
+    value: BOUND_STRING_SCHEMA,
+    placeholder: BOUND_STRING_SCHEMA,
+    options: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          label: BOUND_STRING_SCHEMA,
+          value: {
+            type: "string",
+          },
+        },
+        required: ["label", "value"],
+      },
+    },
+  },
+  required: ["label", "value", "options"],
+  "x-a2uiRole": "select",
+};
+
 const baseDividerSchema: A2UICatalogSchema = {
   type: "object",
   additionalProperties: false,
@@ -250,6 +276,7 @@ export const reportingCatalog: A2UICatalogDefinition = {
     Card: withVariant(baseCardSchema),
     Text: withVariant(baseTextSchema),
     Button: baseButtonSchema,
+    SelectField: baseSelectSchema,
     Divider: baseDividerSchema,
   },
   styles: STYLE_SCHEMAS,
@@ -281,6 +308,10 @@ export const panelCatalog: A2UICatalogDefinition = {
     ActionButton: {
       ...baseButtonSchema,
       "x-a2uiRole": "button",
+    },
+    ChoiceSelect: {
+      ...baseSelectSchema,
+      "x-a2uiRole": "select",
     },
     Rule: {
       ...baseDividerSchema,

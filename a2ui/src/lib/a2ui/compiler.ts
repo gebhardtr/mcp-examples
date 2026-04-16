@@ -8,6 +8,7 @@ import type {
   A2UIAppendix,
   A2UIChecklistItem,
   A2UIMetric,
+  A2UISelection,
   A2UISurfaceKind,
   A2UITable,
   A2UIViewModel,
@@ -78,6 +79,21 @@ export function renderA2UIViewModel(
       variant,
     });
 
+  const addButton = (
+    id: string,
+    child: string,
+    action: NonNullable<A2UIComponentProperties["action"]>,
+    primary?: boolean,
+  ) =>
+    addComponent(id, "button", {
+      child,
+      action,
+      primary,
+    });
+
+  const addSelect = (id: string, properties: A2UIComponentProperties) =>
+    addComponent(id, "select", properties);
+
   const surfaceKind = selectSurfaceKind(viewModel);
 
   rootChildren.push(
@@ -93,6 +109,20 @@ export function renderA2UIViewModel(
 
   if (viewModel.status) {
     rootChildren.push(renderStatus(viewModel, addText, addColumn, addCard));
+  }
+
+  if (viewModel.selection) {
+    rootChildren.push(
+      renderSelection(
+        viewModel.selection,
+        addComponent,
+        addText,
+        addColumn,
+        addCard,
+        addButton,
+        addSelect,
+      ),
+    );
   }
 
   if (surfaceKind === "ops_console") {
@@ -235,6 +265,24 @@ export function renderA2UIViewModel(
             key: "text",
             valueMap: encodeStringMap(textMap),
           },
+          ...(viewModel.selection
+            ? [
+                {
+                  key: "draft",
+                  valueMap: encodeStringMap({
+                    selectedOptionValue: "",
+                  }),
+                },
+                {
+                  key: "result",
+                  valueMap: encodeStringMap({
+                    message:
+                      viewModel.selection.resultMessage ??
+                      "Waiting for a selection. Choose an option and submit it.",
+                  }),
+                },
+              ]
+            : []),
           {
             key: "meta",
             valueMap: encodeStringMap({
@@ -243,6 +291,7 @@ export function renderA2UIViewModel(
               generatedAt: viewModel.meta.generatedAt,
               fallbackReason: viewModel.meta.fallbackReason ?? "",
               surfaceKind,
+              actionEndpoint: viewModel.selection?.actionEndpoint ?? "",
             }),
           },
         ],
@@ -397,6 +446,80 @@ function renderActions(
       addColumn("actions-list", cards, "action-list"),
     ]),
   );
+}
+
+function renderSelection(
+  selection: A2UISelection,
+  addComponent: (
+    id: string,
+    role: keyof A2UICatalogRuntime["roleComponents"],
+    properties: A2UIComponentProperties,
+  ) => string,
+  addText: (id: string, value: string, variant?: string) => string,
+  addColumn: (id: string, children: string[], variant?: string) => string,
+  addCard: (id: string, child: string, variant?: string) => string,
+  addButton: (
+    id: string,
+    child: string,
+    action: NonNullable<A2UIComponentProperties["action"]>,
+    primary?: boolean,
+  ) => string,
+  addSelect: (id: string, properties: A2UIComponentProperties) => string,
+) {
+  const selectId = addSelect("selection-input", {
+    label: { literalString: selection.label },
+    placeholder: selection.placeholder
+      ? { literalString: selection.placeholder }
+      : undefined,
+    value: { path: "/draft/selectedOptionValue" },
+    options: selection.options.map((option) => ({
+      label: { literalString: option.label },
+      value: option.value,
+    })),
+  });
+
+  const submitButton = addButton(
+    "selection-submit-button",
+    addText("selection-submit-label", selection.submitLabel),
+    {
+      name: selection.actionName,
+      context: [
+        {
+          key: selection.actionContextKey,
+          value: { path: "/draft/selectedOptionValue" },
+        },
+      ],
+    },
+    true,
+  );
+
+  const selectionCard = addCard(
+    "selection-card",
+    addColumn("selection-content", [
+      addText("selection-section-title", selection.title, "section-title"),
+      addText("selection-body", selection.body),
+      selectId,
+      submitButton,
+    ]),
+  );
+
+  const resultChildren = [
+    addText(
+      "selection-result-title",
+      selection.resultTitle ?? "Server result",
+      "section-title",
+    ),
+    addComponent("selection-result-body", "text", {
+      text: { path: "/result/message" },
+    }),
+  ];
+
+  const resultCard = addCard(
+    "selection-result-card",
+    addColumn("selection-result-content", resultChildren),
+  );
+
+  return addColumn("selection-stack", [selectionCard, resultCard], "selection-group");
 }
 
 function renderAppendix(
