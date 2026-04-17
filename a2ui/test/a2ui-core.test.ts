@@ -23,6 +23,7 @@ import {
   buildRegionSelection,
   buildRegionSelectionViewModel,
   buildRegionSelectorActionMessages,
+  REGION_SELECTOR_PAGINATE_ACTION_NAME,
   isRegionChangePrompt,
 } from "../src/lib/a2ui/region-selector.ts";
 
@@ -341,6 +342,15 @@ test("renderA2UIViewModel renders a semantic selection as interactive A2UI", () 
       actionContextKey: "regionValue",
       resultTitle: "Server result",
       resultMessage: "Waiting for a selection.",
+      pagination: {
+        pageIndex: 0,
+        pageSize: 2,
+        totalOptions: 4,
+        actionName: REGION_SELECTOR_PAGINATE_ACTION_NAME,
+        previousLabel: "Previous",
+        nextLabel: "More regions",
+        serverName: "oci_http",
+      },
     },
     actionsTitle: undefined,
     actions: [],
@@ -364,6 +374,11 @@ test("renderA2UIViewModel renders a semantic selection as interactive A2UI", () 
   assert.equal(surface.dataModel.meta?.actionEndpoint, "/api/actions/region-selector");
   assert.equal(surface.dataModel.draft?.selectedOptionValue, "");
   assert.equal(surface.dataModel.result?.message, "Waiting for a selection.");
+  assert.equal(surface.dataModel.paging?.currentPageIndex, "0");
+  assert.equal(surface.dataModel.paging?.pageSize, "2");
+  assert.equal(surface.dataModel.paging?.serverName, "oci_http");
+  assert.ok(surface.components["selection-pagination-row"]);
+  assert.ok(surface.components["selection-pagination-next-button"]);
 });
 
 test("region change prompts are recognized for the grounded selector flow", () => {
@@ -424,6 +439,137 @@ test("region selector action returns a same-surface data update", () => {
   assert.equal(surface.surfaceId, "main");
   assert.equal(surface.dataModel.result?.selectedRegionKey, "IAD");
   assert.equal(surface.dataModel.result?.submittedAt, "2026-04-15T14:00:00.000Z");
+});
+
+test("region selections can page through a larger grounded region catalog", () => {
+  const toolExecution = {
+    serverName: "oci_http",
+    toolName: "invoke_oci_api",
+    arguments: {
+      client_fqn: "oci.identity.IdentityClient",
+      operation: "list_regions",
+      params: {},
+    },
+    resultText: JSON.stringify({
+      data: [
+        { key: "IAD", name: "us-ashburn-1" },
+        { key: "PHX", name: "us-phoenix-1" },
+        { key: "LHR", name: "uk-london-1" },
+        { key: "FRA", name: "eu-frankfurt-1" },
+        { key: "NRT", name: "ap-tokyo-1" },
+      ],
+    }),
+  };
+
+  const firstPage = buildRegionSelection(toolExecution, {
+    pageIndex: 0,
+    pageSize: 2,
+  });
+  const lastPage = buildRegionSelection(toolExecution, {
+    pageIndex: 2,
+    pageSize: 2,
+  });
+
+  assert.equal(firstPage?.options.length, 2);
+  assert.equal(firstPage?.pagination?.totalOptions, 5);
+  assert.equal(firstPage?.pagination?.pageIndex, 0);
+  assert.equal(lastPage?.options.length, 1);
+  assert.equal(lastPage?.options[0]?.value, "PHX::us-phoenix-1");
+  assert.equal(lastPage?.pagination?.pageIndex, 2);
+});
+
+test("a later full same-surface selection stream can replace paged options", () => {
+  const firstPageMessages = renderA2UIViewModel({
+    surfaceKind: "ops_console",
+    title: "Change Current OCI Region",
+    summary: "Page one.",
+    status: undefined,
+    metrics: [],
+    checklistTitle: undefined,
+    checklist: [],
+    table: undefined,
+    selection: {
+      title: "Region selector",
+      body: "Choose a region.",
+      label: "OCI region",
+      options: [
+        { label: "us-ashburn-1 (IAD)", value: "IAD::us-ashburn-1" },
+        { label: "us-phoenix-1 (PHX)", value: "PHX::us-phoenix-1" },
+      ],
+      submitLabel: "Apply region selection",
+      actionName: "submitRegionSelection",
+      actionEndpoint: "/api/actions/region-selector",
+      actionContextKey: "regionValue",
+      pagination: {
+        pageIndex: 0,
+        pageSize: 2,
+        totalOptions: 4,
+        actionName: REGION_SELECTOR_PAGINATE_ACTION_NAME,
+        serverName: "oci_http",
+      },
+    },
+    actionsTitle: undefined,
+    actions: [],
+    appendix: undefined,
+    meta: {
+      source: "server",
+      model: "test",
+      generatedAt: "2026-04-17T00:00:00.000Z",
+    },
+  });
+  const secondPageMessages = renderA2UIViewModel({
+    surfaceKind: "ops_console",
+    title: "Change Current OCI Region",
+    summary: "Page two.",
+    status: undefined,
+    metrics: [],
+    checklistTitle: undefined,
+    checklist: [],
+    table: undefined,
+    selection: {
+      title: "Region selector",
+      body: "Choose a region.",
+      label: "OCI region",
+      options: [
+        { label: "uk-london-1 (LHR)", value: "LHR::uk-london-1" },
+        { label: "eu-frankfurt-1 (FRA)", value: "FRA::eu-frankfurt-1" },
+      ],
+      submitLabel: "Apply region selection",
+      actionName: "submitRegionSelection",
+      actionEndpoint: "/api/actions/region-selector",
+      actionContextKey: "regionValue",
+      pagination: {
+        pageIndex: 1,
+        pageSize: 2,
+        totalOptions: 4,
+        actionName: REGION_SELECTOR_PAGINATE_ACTION_NAME,
+        serverName: "oci_http",
+      },
+    },
+    actionsTitle: undefined,
+    actions: [],
+    appendix: undefined,
+    meta: {
+      source: "server",
+      model: "test",
+      generatedAt: "2026-04-17T00:00:01.000Z",
+    },
+  });
+  const surface = materializeA2UISurface([
+    ...firstPageMessages,
+    ...secondPageMessages,
+  ]);
+  const selectionEntry = getComponentEntry(surface.components["selection-input"]);
+  const options = Array.isArray(selectionEntry?.properties.options)
+    ? selectionEntry?.properties.options
+    : [];
+
+  assert.equal(surface.dataModel.paging?.currentPageIndex, "1");
+  assert.equal(options.length, 2);
+  assert.equal(
+    (options[0] as { label?: { literalString?: string } }).label?.literalString,
+    "uk-london-1 (LHR)",
+  );
 });
 
 function findNode(node: { id: string; properties?: Record<string, unknown> } | null, id: string) {

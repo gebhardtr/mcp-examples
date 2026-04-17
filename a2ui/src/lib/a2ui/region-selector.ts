@@ -1,15 +1,39 @@
 import type { A2UIClientEventMessage } from "@a2ui/react";
-import type { MCPToolExecution } from "@/lib/mcp/types";
+import type { AppConfig } from "../config/types.ts";
+import { negotiateCatalog } from "./catalogs/index.ts";
+import {
+  callMcpTool,
+  listAvailableTools,
+  withMcpClient,
+} from "../mcp/client.ts";
+import type { MCPToolExecution } from "../mcp/types.ts";
+import { renderA2UIViewModel } from "./compiler.ts";
+import { buildGroundedFailureViewModel } from "./grounded-failure.ts";
 import type { A2UISelection, A2UIViewModel } from "./types.ts";
 import type { A2UIMessage } from "./protocol.ts";
 
 export const REGION_SELECTOR_ACTION_ENDPOINT = "/api/actions/region-selector";
 export const REGION_SELECTOR_ACTION_NAME = "submitRegionSelection";
+export const REGION_SELECTOR_PAGINATE_ACTION_NAME = "paginateRegionSelection";
+
 const MAIN_SURFACE_ID = "main";
+const DEFAULT_REGION_PAGE_SIZE = 20;
+const REGION_LIST_TOOL_NAME = "invoke_oci_api";
+const REGION_LIST_TOOL_ARGS = {
+  client_fqn: "oci.identity.IdentityClient",
+  operation: "list_regions",
+  params: {},
+} satisfies Record<string, unknown>;
 
 type OciRegion = {
   key: string;
   name: string;
+};
+
+type RegionSelectionOptions = {
+  pageIndex?: number;
+  pageSize?: number;
+  serverName?: string;
 };
 
 export function isRegionChangePrompt(prompt: string) {
@@ -23,6 +47,7 @@ export function isRegionChangePrompt(prompt: string) {
 
 export function buildRegionSelection(
   toolExecution: MCPToolExecution | undefined,
+  options: RegionSelectionOptions = {},
 ): A2UISelection | undefined {
   if (!toolExecution) {
     return undefined;
@@ -33,12 +58,23 @@ export function buildRegionSelection(
     return undefined;
   }
 
+  const pageSize = clampPageSize(options.pageSize);
+  const lastPageIndex = Math.max(0, Math.ceil(regions.length / pageSize) - 1);
+  const pageIndex = clampPageIndex(options.pageIndex ?? 0, lastPageIndex);
+  const pagedRegions = regions.slice(
+    pageIndex * pageSize,
+    pageIndex * pageSize + pageSize,
+  );
+
   return {
     title: "Region selector",
-    body: "Choose one region from the grounded OCI region catalog returned by MCP, then submit it back to the server.",
+    body:
+      regions.length > pageSize
+        ? "Choose a region from the current page, or use the paging controls to load more grounded OCI regions."
+        : "Choose one region from the grounded OCI region catalog returned by MCP, then submit it back to the server.",
     label: "OCI region",
     placeholder: "Choose a region",
-    options: regions.map((region) => ({
+    options: pagedRegions.map((region) => ({
       label: `${region.name} (${region.key})`,
       value: encodeRegionValue(region),
     })),
@@ -49,13 +85,26 @@ export function buildRegionSelection(
     resultTitle: "Server result",
     resultMessage:
       "Waiting for a region selection. Pick a region from the dropdown and submit it.",
+    pagination:
+      regions.length > pageSize
+        ? {
+            pageIndex,
+            pageSize,
+            totalOptions: regions.length,
+            actionName: REGION_SELECTOR_PAGINATE_ACTION_NAME,
+            previousLabel: "Previous",
+            nextLabel: "More regions",
+            serverName: options.serverName ?? toolExecution.serverName,
+          }
+        : undefined,
   };
 }
 
 export function buildRegionSelectionViewModel(
   toolExecution: MCPToolExecution | undefined,
+  options: RegionSelectionOptions = {},
 ): A2UIViewModel | undefined {
-  const selection = buildRegionSelection(toolExecution);
+  const selection = buildRegionSelection(toolExecution, options);
 
   if (!selection) {
     return undefined;
@@ -75,8 +124,12 @@ export function buildRegionSelectionViewModel(
     metrics: [
       {
         label: "Regions",
-        value: String(selection.options.length),
-        detail: "Live OCI regions returned by the grounded MCP request.",
+        value: selection.pagination
+          ? String(selection.pagination.totalOptions)
+          : String(selection.options.length),
+        detail: selection.pagination
+          ? "Live OCI regions returned by the grounded MCP request, with paging controls for the selector."
+          : "Live OCI regions returned by the grounded MCP request.",
       },
       {
         label: "Source",
@@ -86,7 +139,8 @@ export function buildRegionSelectionViewModel(
       {
         label: "Interaction",
         value: "userAction",
-        detail: "Submitting the selector posts the chosen value back to the server for a same-surface update.",
+        detail:
+          "Submitting the selector posts the chosen value back to the server, and paging controls can load more grounded options.",
       },
     ],
     selection,
@@ -100,7 +154,7 @@ export function buildRegionSelectionViewModel(
       {
         label: "Interactive follow-up",
         description:
-          "The dropdown selection is sent back as an A2UI userAction, and the server responds with a delta update for the same surface.",
+          "The dropdown selection is sent back as an A2UI userAction, and paging controls can request more grounded region options on the same surface.",
       },
     ],
     appendix: {
@@ -154,6 +208,63 @@ export function buildRegionSelectorActionMessages(
   ];
 }
 
+export async function buildRegionSelectorPaginationMessages(
+  message: A2UIClientEventMessage,
+  appConfig: AppConfig,
+): Promise<A2UIMessage[]> {
+  const userAction = message.userAction;
+  if (!userAction) {
+    throw new Error("Region selector paging must include userAction.");
+  }
+
+  if (userAction.name !== REGION_SELECTOR_PAGINATE_ACTION_NAME) {
+    throw new Error(`Unsupported region selector action "${userAction.name}".`);
+  }
+
+  const direction =
+    userAction.context?.direction === "previous" ? "previous" : "next";
+  const currentPageIndex = parseInteger(userAction.context?.currentPageIndex, 0);
+  const pageSize = clampPageSize(
+    parseInteger(userAction.context?.pageSize, DEFAULT_REGION_PAGE_SIZE),
+  );
+  const preferredServerName =
+    typeof userAction.context?.serverName === "string" &&
+    userAction.context.serverName.trim()
+      ? userAction.context.serverName.trim()
+      : undefined;
+  const catalogId =
+    typeof userAction.context?.catalogId === "string" &&
+    userAction.context.catalogId.trim()
+      ? userAction.context.catalogId.trim()
+      : undefined;
+  const nextPageIndex =
+    direction === "previous" ? currentPageIndex - 1 : currentPageIndex + 1;
+  const toolExecution = await loadGroundedRegionToolExecution(
+    appConfig,
+    preferredServerName,
+  );
+  const nextViewModel = buildRegionSelectionViewModel(toolExecution, {
+    pageIndex: nextPageIndex,
+    pageSize,
+    serverName: toolExecution.serverName,
+  });
+
+  if (!nextViewModel) {
+    return renderA2UIViewModel(
+      buildGroundedFailureViewModel(
+        "change my current region",
+        buildRegionSelectionFailure(toolExecution),
+      ),
+      resolveRegionPaginationCatalogRuntime(catalogId),
+    );
+  }
+
+  return renderA2UIViewModel(
+    nextViewModel,
+    resolveRegionPaginationCatalogRuntime(catalogId),
+  );
+}
+
 export function buildRegionSelectionFailure(
   toolExecution: MCPToolExecution | undefined,
 ): Error {
@@ -170,6 +281,53 @@ export function buildRegionSelectionFailure(
 
   return new Error(
     `The grounded tool result from ${toolExecution.serverName}.${toolExecution.toolName} did not contain OCI region rows.`,
+  );
+}
+
+export async function loadGroundedRegionToolExecution(
+  appConfig: AppConfig,
+  preferredServerName?: string,
+): Promise<MCPToolExecution> {
+  const serverDefinitions = resolveActiveRegionServers(appConfig, preferredServerName);
+  const failures: string[] = [];
+
+  for (const definition of serverDefinitions) {
+    try {
+      const resultText = await withMcpClient(definition, async (client) => {
+        const tools = await listAvailableTools(
+          client,
+          definition.name,
+          definition.toolAllowlist,
+        );
+
+        if (!tools.some((tool) => tool.name === REGION_LIST_TOOL_NAME)) {
+          throw new Error(
+            `no ${REGION_LIST_TOOL_NAME} tool available on ${definition.name}`,
+          );
+        }
+
+        return callMcpTool(client, REGION_LIST_TOOL_NAME, REGION_LIST_TOOL_ARGS);
+      });
+
+      return {
+        serverName: definition.name,
+        toolName: REGION_LIST_TOOL_NAME,
+        arguments: REGION_LIST_TOOL_ARGS,
+        resultText,
+      };
+    } catch (error) {
+      failures.push(
+        `${definition.name}: ${
+          error instanceof Error ? error.message : "unknown region lookup error"
+        }`,
+      );
+    }
+  }
+
+  throw new Error(
+    `Unable to load OCI regions from MCP. ${
+      failures.length ? failures.join("; ") : "No region-capable MCP server is configured."
+    }`,
   );
 }
 
@@ -212,6 +370,37 @@ function decodeRegionValue(value: string) {
     key: key.trim(),
     name: nameParts.join("::").trim(),
   };
+}
+
+function clampPageIndex(pageIndex: number, lastPageIndex: number) {
+  if (!Number.isFinite(pageIndex)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(lastPageIndex, Math.trunc(pageIndex)));
+}
+
+function clampPageSize(pageSize: number | undefined) {
+  if (!pageSize || !Number.isFinite(pageSize) || pageSize <= 0) {
+    return DEFAULT_REGION_PAGE_SIZE;
+  }
+
+  return Math.trunc(pageSize);
+}
+
+function parseInteger(value: unknown, fallback: number) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return fallback;
 }
 
 function collectRegionCandidates(value: unknown): OciRegion[] {
@@ -275,4 +464,36 @@ function firstString(...values: unknown[]) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function resolveActiveRegionServers(
+  appConfig: AppConfig,
+  preferredServerName?: string,
+) {
+  const configuredServers = appConfig.mcp.servers;
+  const activeServerNames = appConfig.mcp.activeServers?.length
+    ? appConfig.mcp.activeServers
+    : Object.keys(configuredServers);
+
+  const prioritizedNames = preferredServerName
+    ? [preferredServerName, ...activeServerNames.filter((name) => name !== preferredServerName)]
+    : activeServerNames;
+
+  return prioritizedNames
+    .map((serverName) => configuredServers[serverName])
+    .filter(Boolean);
+}
+
+function resolveRegionPaginationCatalogRuntime(catalogId?: string) {
+  if (!catalogId) {
+    return undefined;
+  }
+
+  try {
+    return negotiateCatalog({
+      supportedCatalogIds: [catalogId],
+    });
+  } catch {
+    return undefined;
+  }
 }

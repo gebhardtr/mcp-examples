@@ -118,6 +118,7 @@ export function renderA2UIViewModel(
         addComponent,
         addText,
         addColumn,
+        addRow,
         addCard,
         addButton,
         addSelect,
@@ -281,6 +282,29 @@ export function renderA2UIViewModel(
                       "Waiting for a selection. Choose an option and submit it.",
                   }),
                 },
+                ...(viewModel.selection.pagination
+                  ? [
+                      {
+                        key: "paging",
+                        valueMap: encodeStringMap({
+                          currentPageIndex: String(
+                            viewModel.selection.pagination.pageIndex,
+                          ),
+                          pageSize: String(viewModel.selection.pagination.pageSize),
+                          totalOptions: String(
+                            viewModel.selection.pagination.totalOptions,
+                          ),
+                          serverName:
+                            viewModel.selection.pagination.serverName ?? "",
+                          status: formatSelectionPageStatus(
+                            viewModel.selection.pagination.pageIndex,
+                            viewModel.selection.pagination.pageSize,
+                            viewModel.selection.pagination.totalOptions,
+                          ),
+                        }),
+                      },
+                    ]
+                  : []),
               ]
             : []),
           {
@@ -292,6 +316,7 @@ export function renderA2UIViewModel(
               fallbackReason: viewModel.meta.fallbackReason ?? "",
               surfaceKind,
               actionEndpoint: viewModel.selection?.actionEndpoint ?? "",
+              catalogId: catalogRuntime.catalog.catalogId,
             }),
           },
         ],
@@ -457,6 +482,7 @@ function renderSelection(
   ) => string,
   addText: (id: string, value: string, variant?: string) => string,
   addColumn: (id: string, children: string[], variant?: string) => string,
+  addRow: (id: string, children: string[], variant?: string) => string,
   addCard: (id: string, child: string, variant?: string) => string,
   addButton: (
     id: string,
@@ -493,12 +519,20 @@ function renderSelection(
     true,
   );
 
+  const pagingControls = renderSelectionPagination(
+    selection,
+    addText,
+    addRow,
+    addButton,
+  );
+
   const selectionCard = addCard(
     "selection-card",
     addColumn("selection-content", [
       addText("selection-section-title", selection.title, "section-title"),
       addText("selection-body", selection.body),
       selectId,
+      ...(pagingControls ? [pagingControls] : []),
       submitButton,
     ]),
   );
@@ -520,6 +554,116 @@ function renderSelection(
   );
 
   return addColumn("selection-stack", [selectionCard, resultCard], "selection-group");
+}
+
+function renderSelectionPagination(
+  selection: A2UISelection,
+  addText: (id: string, value: string, variant?: string) => string,
+  addRow: (id: string, children: string[], variant?: string) => string,
+  addButton: (
+    id: string,
+    child: string,
+    action: NonNullable<A2UIComponentProperties["action"]>,
+    primary?: boolean,
+  ) => string,
+) {
+  const pagination = selection.pagination;
+
+  if (!pagination || pagination.totalOptions <= pagination.pageSize) {
+    return null;
+  }
+
+  const lastPageIndex = Math.max(
+    0,
+    Math.ceil(pagination.totalOptions / pagination.pageSize) - 1,
+  );
+  const children = [
+    addText(
+      "selection-pagination-status",
+      formatSelectionPageStatus(
+        pagination.pageIndex,
+        pagination.pageSize,
+        pagination.totalOptions,
+      ),
+      "meta",
+    ),
+  ];
+
+  if (pagination.pageIndex > 0) {
+    children.push(
+      addButton(
+        "selection-pagination-prev-button",
+        addText(
+          "selection-pagination-prev-label",
+          pagination.previousLabel ?? "Previous page",
+        ),
+        {
+          name: pagination.actionName,
+          context: [
+            {
+              key: "direction",
+              value: { literalString: "previous" },
+            },
+            {
+              key: "currentPageIndex",
+              value: { path: "/paging/currentPageIndex" },
+            },
+            {
+              key: "pageSize",
+              value: { path: "/paging/pageSize" },
+            },
+            {
+              key: "serverName",
+              value: { path: "/paging/serverName" },
+            },
+            {
+              key: "catalogId",
+              value: { path: "/meta/catalogId" },
+            },
+          ],
+        },
+      ),
+    );
+  }
+
+  if (pagination.pageIndex < lastPageIndex) {
+    children.push(
+      addButton(
+        "selection-pagination-next-button",
+        addText(
+          "selection-pagination-next-label",
+          pagination.nextLabel ?? "Next page",
+        ),
+        {
+          name: pagination.actionName,
+          context: [
+            {
+              key: "direction",
+              value: { literalString: "next" },
+            },
+            {
+              key: "currentPageIndex",
+              value: { path: "/paging/currentPageIndex" },
+            },
+            {
+              key: "pageSize",
+              value: { path: "/paging/pageSize" },
+            },
+            {
+              key: "serverName",
+              value: { path: "/paging/serverName" },
+            },
+            {
+              key: "catalogId",
+              value: { path: "/meta/catalogId" },
+            },
+          ],
+        },
+      ),
+    );
+  }
+
+  return addRow("selection-pagination-row", children);
 }
 
 function renderAppendix(
@@ -570,6 +714,21 @@ function encodeStringMap(entries: Record<string, string>): A2UIDataEntry[] {
     key,
     valueString: value,
   }));
+}
+
+function formatSelectionPageStatus(
+  pageIndex: number,
+  pageSize: number,
+  totalOptions: number,
+) {
+  if (totalOptions <= 0) {
+    return "No options available.";
+  }
+
+  const start = pageIndex * pageSize + 1;
+  const end = Math.min(totalOptions, start + pageSize - 1);
+
+  return `Showing ${start}-${end} of ${totalOptions}`;
 }
 
 function pruneUndefined<T extends Record<string, unknown>>(value: T): T {

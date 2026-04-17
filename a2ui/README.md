@@ -181,22 +181,14 @@ This is the canonical interaction path for the main app. A prompt such as `chang
 ```mermaid
 sequenceDiagram
     participant Browser as "Browser UI"
-    participant Client as "Client-side app
-    A2UI Workbench + ResponseSurface"
-    participant Route as "Server-side app
-    /api/respond"
-    participant Service as "Server-side app
-    A2UI Orchestrator"
-    participant Agent as "Agent
-    grounded agent loop"
-    participant MCP as "MCP server
-    OCI sidecar"
-    participant LLM as "LLM
-    MCP planner"
-    participant Compile as "Server-side app
-    Catalog Compiler"
-    participant ActionRoute as "Server-side app
-    /api/actions/region-selector"
+    participant Client as "Client-side app / A2UI Workbench + ResponseSurface"
+    participant Route as "Server-side app / /api/respond"
+    participant Service as "Server-side app / A2UI Orchestrator"
+    participant Agent as "Agent / grounded agent loop"
+    participant MCP as "MCP server / OCI sidecar"
+    participant LLM as "LLM / MCP planner"
+    participant Compile as "Server-side app / Catalog Compiler"
+    participant ActionRoute as "Server-side app / /api/actions/region-selector"
 
     Browser->>Route: POST /api/respond { prompt: "change my current region" }
     Route->>Service: generateA2UIMessageStream(...)
@@ -210,6 +202,11 @@ sequenceDiagram
     Compile-->>Route: initial A2UI message stream
     Route-->>Client: `surfaceUpdate` + `dataModelUpdate` + `beginRendering`
     Client-->>Browser: render grounded selector
+    Browser->>Client: click "More regions"
+    Client->>ActionRoute: POST pagination userAction
+    ActionRoute->>MCP: refetch grounded OCI regions
+    MCP-->>ActionRoute: grounded region catalog
+    ActionRoute-->>Client: refreshed same-surface selector stream
     Browser->>Client: choose region + click submit
     Client->>ActionRoute: POST userAction with resolved region value
     ActionRoute-->>Client: delta `dataModelUpdate`
@@ -219,6 +216,7 @@ sequenceDiagram
 Grounded does not mean every interaction has to go back through the model.
 
 - The initial grounded surface can be produced through `server -> agent -> MCP -> compiler`, with the model used for planning when the workflow needs it.
+- When the grounded option set is large, follow-up `userAction` requests can ask the server for another page of options and the server can return a refreshed selector for the same surface.
 - Follow-up `userAction` handling can be deterministic server logic when the action contract is already known.
 - That is still idiomatic A2UI: the server owns the UI protocol, the client emits `userAction`, and the server returns updates.
 
@@ -251,7 +249,7 @@ Use these prompts to exercise the main demo flows quickly.
 
 | Prompt | Mode | Expected result |
 | --- | --- | --- |
-| `change my current region` | Live MCP-backed | Grounded interactive region selector with a live OCI region dropdown and a same-surface `userAction` round trip |
+| `change my current region` | Live MCP-backed | Grounded interactive region selector with a live OCI region dropdown, same-surface `userAction` round trip, and paging controls when the option set is large |
 | `list all OCI regions` | Live MCP-backed | Grounded reporting surface with OCI region metrics and a table of live regions |
 | `Plan a production readiness review for a new MCP-backed application.` | Mock or live | Reporting-style ops console with summary cards, metrics, checklist items, and supporting actions |
 | `Summarize an incident triage flow for an API latency spike.` | Mock or live | Incident-oriented response surface with status, steps, and operational guidance |

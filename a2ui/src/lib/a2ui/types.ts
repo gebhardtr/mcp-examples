@@ -28,6 +28,16 @@ export type A2UISelectionOption = {
   detail?: string;
 };
 
+export type A2UISelectionPagination = {
+  pageIndex: number;
+  pageSize: number;
+  totalOptions: number;
+  actionName: string;
+  previousLabel?: string;
+  nextLabel?: string;
+  serverName?: string;
+};
+
 export type A2UISelection = {
   title: string;
   body: string;
@@ -40,6 +50,7 @@ export type A2UISelection = {
   actionContextKey: string;
   resultTitle?: string;
   resultMessage?: string;
+  pagination?: A2UISelectionPagination;
 };
 
 export type A2UIAppendix = {

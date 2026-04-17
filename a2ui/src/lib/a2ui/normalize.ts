@@ -4,6 +4,7 @@ import type {
   A2UIChecklistItem,
   A2UIMetric,
   A2UISelection,
+  A2UISelectionPagination,
   A2UISelectionOption,
   A2UISurfaceKind,
   A2UITable,
@@ -160,6 +161,7 @@ function normalizeSelection(value: unknown): A2UISelection | undefined {
     actionContextKey: asString(value.actionContextKey, "selectionValue"),
     resultTitle: asOptionalString(value.resultTitle),
     resultMessage: asOptionalString(value.resultMessage),
+    pagination: normalizeSelectionPagination(value.pagination),
   };
 }
 
@@ -172,6 +174,31 @@ function normalizeSelectionOption(value: unknown): A2UISelectionOption | null {
     label: asString(value.label, "Option"),
     value: asString(value.value, ""),
     detail: asOptionalString(value.detail),
+  };
+}
+
+function normalizeSelectionPagination(
+  value: unknown,
+): A2UISelectionPagination | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const totalOptions = asNonNegativeInteger(value.totalOptions, 0);
+  const pageSize = asPositiveInteger(value.pageSize, 0);
+
+  if (totalOptions === 0 || pageSize === 0) {
+    return undefined;
+  }
+
+  return {
+    pageIndex: asNonNegativeInteger(value.pageIndex, 0),
+    pageSize,
+    totalOptions,
+    actionName: asString(value.actionName, "paginateSelection"),
+    previousLabel: asOptionalString(value.previousLabel),
+    nextLabel: asOptionalString(value.nextLabel),
+    serverName: asOptionalString(value.serverName),
   };
 }
 
@@ -214,6 +241,22 @@ function parseSurfaceKind(value: unknown): A2UISurfaceKind | undefined {
     value === "decision_report"
     ? value
     : undefined;
+}
+
+function asNonNegativeInteger(value: unknown, fallback: number) {
+  return typeof value === "number" &&
+      Number.isInteger(value) &&
+      value >= 0
+    ? value
+    : fallback;
+}
+
+function asPositiveInteger(value: unknown, fallback: number) {
+  return typeof value === "number" &&
+      Number.isInteger(value) &&
+      value > 0
+    ? value
+    : fallback;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

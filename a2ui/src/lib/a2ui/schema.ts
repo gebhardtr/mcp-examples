@@ -11,7 +11,7 @@ Shape the response as a semantic view model with:
 - checklistTitle?: string
 - checklist?: array of { title, detail }
 - table?: { title, columns[string], rows[string[]] }
-- selection?: { title, body, label, placeholder?, options[{ label, value, detail? }], submitLabel, actionName, actionEndpoint, actionContextKey, resultTitle?, resultMessage? }
+- selection?: { title, body, label, placeholder?, options[{ label, value, detail? }], submitLabel, actionName, actionEndpoint, actionContextKey, resultTitle?, resultMessage?, pagination? }
 - actionsTitle?: string
 - actions?: array of { label, description }
 - appendix?: { title, body, format }
@@ -89,6 +89,25 @@ const SELECTION_OPTION_SCHEMA = strictObject({
   detail: nullable(STRING_SCHEMA),
 });
 
+const SELECTION_PAGINATION_SCHEMA = strictObject({
+  pageIndex: {
+    type: "integer",
+    minimum: 0,
+  },
+  pageSize: {
+    type: "integer",
+    minimum: 1,
+  },
+  totalOptions: {
+    type: "integer",
+    minimum: 0,
+  },
+  actionName: STRING_SCHEMA,
+  previousLabel: nullable(STRING_SCHEMA),
+  nextLabel: nullable(STRING_SCHEMA),
+  serverName: nullable(STRING_SCHEMA),
+});
+
 const SELECTION_SCHEMA = strictObject({
   title: STRING_SCHEMA,
   body: STRING_SCHEMA,
@@ -104,6 +123,7 @@ const SELECTION_SCHEMA = strictObject({
   actionContextKey: STRING_SCHEMA,
   resultTitle: nullable(STRING_SCHEMA),
   resultMessage: nullable(STRING_SCHEMA),
+  pagination: nullable(SELECTION_PAGINATION_SCHEMA),
 });
 
 const APPENDIX_SCHEMA = strictObject({
