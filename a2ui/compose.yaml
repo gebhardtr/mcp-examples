@@ -14,6 +14,7 @@ services:
       - ./config/app-config.toml:/app/config/app-config.toml:ro
     environment:
       A2UI_MODE: ${A2UI_MODE:-}
+      A2UI_OPENAI_TIMEOUT_MS: ${A2UI_OPENAI_TIMEOUT_MS:-120000}
     secrets:
       - openai_api_key
     restart: unless-stopped

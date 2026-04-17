@@ -1,6 +1,6 @@
 import type { A2UIClientEventMessage } from "@a2ui/react";
 import type { MCPToolExecution } from "@/lib/mcp/types";
-import type { A2UISelection } from "./types.ts";
+import type { A2UISelection, A2UIViewModel } from "./types.ts";
 import type { A2UIMessage } from "./protocol.ts";
 
 export const REGION_SELECTOR_ACTION_ENDPOINT = "/api/actions/region-selector";
@@ -49,6 +49,70 @@ export function buildRegionSelection(
     resultTitle: "Server result",
     resultMessage:
       "Waiting for a region selection. Pick a region from the dropdown and submit it.",
+  };
+}
+
+export function buildRegionSelectionViewModel(
+  toolExecution: MCPToolExecution | undefined,
+): A2UIViewModel | undefined {
+  const selection = buildRegionSelection(toolExecution);
+
+  if (!selection) {
+    return undefined;
+  }
+
+  return {
+    surfaceKind: "ops_console",
+    title: "Change Current OCI Region",
+    summary:
+      "Select a grounded OCI region from the live region catalog returned through the MCP-backed server path.",
+    status: {
+      tone: "info",
+      title: "Grounded region catalog ready",
+      body:
+        "The server retrieved live OCI regions through MCP. Choose a region and submit it to continue the same-surface A2UI interaction loop.",
+    },
+    metrics: [
+      {
+        label: "Regions",
+        value: String(selection.options.length),
+        detail: "Live OCI regions returned by the grounded MCP request.",
+      },
+      {
+        label: "Source",
+        value: "OCI MCP",
+        detail: `${toolExecution?.serverName ?? "unknown server"}.${toolExecution?.toolName ?? "unknown tool"}`,
+      },
+      {
+        label: "Interaction",
+        value: "userAction",
+        detail: "Submitting the selector posts the chosen value back to the server for a same-surface update.",
+      },
+    ],
+    selection,
+    actionsTitle: "How this works",
+    actions: [
+      {
+        label: "Grounded initial load",
+        description:
+          "The agent planned an MCP call, fetched the live OCI region catalog, and the server shaped the selector from that grounded result.",
+      },
+      {
+        label: "Interactive follow-up",
+        description:
+          "The dropdown selection is sent back as an A2UI userAction, and the server responds with a delta update for the same surface.",
+      },
+    ],
+    appendix: {
+      title: "Grounding detail",
+      format: "text",
+      body: `Grounded via ${toolExecution?.serverName ?? "unknown server"}.${toolExecution?.toolName ?? "unknown tool"} using live OCI region data.`,
+    },
+    meta: {
+      source: "server",
+      model: "grounded-region-selector",
+      generatedAt: new Date().toISOString(),
+    },
   };
 }
 

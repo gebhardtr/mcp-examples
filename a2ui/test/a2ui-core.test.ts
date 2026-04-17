@@ -20,11 +20,8 @@ import {
 import { planA2UIReplay } from "../src/lib/a2ui/replay-plan.ts";
 import { buildGroundedFailureViewModel } from "../src/lib/a2ui/grounded-failure.ts";
 import {
-  buildInteractiveExampleActionMessages,
-  buildInteractiveExampleInitialMessages,
-} from "../src/lib/a2ui/interactive-example.ts";
-import {
   buildRegionSelection,
+  buildRegionSelectionViewModel,
   buildRegionSelectorActionMessages,
   isRegionChangePrompt,
 } from "../src/lib/a2ui/region-selector.ts";
@@ -319,45 +316,6 @@ test("grounded live failures render an explicit server failure surface", () => {
   );
 });
 
-test("interactive example renders a text field and a button", () => {
-  const messages = buildInteractiveExampleInitialMessages();
-  const surface = materializeA2UISurface(messages);
-
-  assert.equal(surface.root, "root");
-  assert.equal(
-    getComponentEntry(surface.components["name-field"])?.componentType,
-    "TextField",
-  );
-  assert.equal(
-    getComponentEntry(surface.components["submit-button"])?.componentType,
-    "Button",
-  );
-  assert.equal(surface.dataModel.draft?.name, "");
-});
-
-test("interactive example userAction returns data updates for the same surface", () => {
-  const initialMessages = buildInteractiveExampleInitialMessages();
-  const deltaMessages = buildInteractiveExampleActionMessages({
-    userAction: {
-      name: "submitGreeting",
-      surfaceId: "interactive-demo",
-      sourceComponentId: "submit-button",
-      timestamp: "2026-04-15T12:00:00.000Z",
-      context: {
-        name: "A2UI",
-      },
-    },
-  });
-  const surface = materializeA2UISurface([...initialMessages, ...deltaMessages]);
-
-  assert.match(
-    String(surface.dataModel.result?.message ?? ""),
-    /Hello, A2UI/i,
-  );
-  assert.equal(surface.dataModel.result?.lastSubmittedAt, "2026-04-15T12:00:00.000Z");
-  assert.equal(surface.dataModel.draft?.name, "");
-});
-
 test("renderA2UIViewModel renders a semantic selection as interactive A2UI", () => {
   const messages = renderA2UIViewModel({
     surfaceKind: "ops_console",
@@ -415,7 +373,7 @@ test("region change prompts are recognized for the grounded selector flow", () =
 });
 
 test("region tool output becomes a grounded selection model", () => {
-  const selection = buildRegionSelection({
+  const toolExecution = {
     serverName: "oci_http",
     toolName: "invoke_oci_api",
     arguments: {
@@ -431,12 +389,18 @@ test("region tool output becomes a grounded selection model", () => {
         { key: "PHX", name: "us-phoenix-1" },
       ],
     }),
-  });
+  };
+  const selection = buildRegionSelection(toolExecution);
+  const viewModel = buildRegionSelectionViewModel(toolExecution);
 
   assert.ok(selection);
   assert.equal(selection?.options.length, 2);
   assert.equal(selection?.options[0]?.value, "IAD::us-ashburn-1");
   assert.equal(selection?.actionEndpoint, "/api/actions/region-selector");
+  assert.ok(viewModel);
+  assert.equal(viewModel?.meta.source, "server");
+  assert.equal(viewModel?.selection?.options.length, 2);
+  assert.match(String(viewModel?.summary ?? ""), /live region catalog/i);
 });
 
 test("region selector action returns a same-surface data update", () => {

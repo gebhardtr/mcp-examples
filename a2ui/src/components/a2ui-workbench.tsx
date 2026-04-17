@@ -181,8 +181,9 @@ export function A2UIWorkbench({ starterPrompts }: A2UIWorkbenchProps) {
         <p>
           This example keeps the flow explicit: prompts go to a typed server
           route, the server returns A2UI protocol messages, and the client
-          renders the negotiated catalog instead of treating model text as raw
-          HTML.
+          renders the negotiated catalog. Some prompts resolve to grounded
+          reporting surfaces, and some resolve to grounded interactive surfaces
+          that continue through `userAction`.
         </p>
       </section>
 
@@ -192,8 +193,10 @@ export function A2UIWorkbench({ starterPrompts }: A2UIWorkbenchProps) {
             <h2 className="section-title">Prompt Studio</h2>
             <p className="section-copy">
               Start with a seeded production scenario or write your own prompt.
-              The server defaults to mock mode until an OpenAI API key is
-              configured.
+              The same main flow can return read-only reporting UI or
+              interactive UI that posts follow-up `userAction` messages back to
+              the server. The server defaults to mock mode until an OpenAI API
+              key is configured.
             </p>
 
             <div className="prompt-list">
@@ -231,9 +234,6 @@ export function A2UIWorkbench({ starterPrompts }: A2UIWorkbenchProps) {
                 <div className="button-group">
                   <Link href="/render" className="secondary-button">
                     Open A2UI renderer
-                  </Link>
-                  <Link href="/interactive" className="secondary-button">
-                    Open interactive example
                   </Link>
                   <button
                     className="secondary-button"

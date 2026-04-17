@@ -33,8 +33,9 @@ flowchart LR
     end
 
     subgraph Server["Server-side app"]
-        ServerApp["Respond API Route
+        ServerApp["A2UI Response Route
         A2UI Orchestrator
+        Action Routes
         Catalog Registry + Negotiation
         Mock View Model Generator
         Semantic View Model Normalizer
@@ -68,7 +69,7 @@ flowchart LR
     ServerApp -->|"A2UI message stream"| ClientApp
 ```
 
-See [Live Model Path](#live-model-path) below for the detailed step-by-step request flow.
+See [Live Model Path](#live-model-path) and [Grounded Interaction Path](#grounded-interaction-path) below for the detailed request flows.
 
 Implementation map:
 
@@ -79,8 +80,9 @@ Client-side app:
 
 Server-side app:
 
-- `Respond API Route`: `src/app/api/respond/route.ts`
+- `A2UI Response Route`: `src/app/api/respond/route.ts`
 - `A2UI Orchestrator`: `src/lib/a2ui/service.ts`
+- `Action Routes`: `src/app/api/actions/*`
 - `Catalog Registry + Negotiation`: `src/lib/a2ui/catalogs`
 - `Mock View Model Generator`: `src/lib/a2ui/mock.ts`
 - `Semantic View Model Normalizer`: `src/lib/a2ui/normalize.ts`
@@ -158,8 +160,7 @@ sequenceDiagram
 
 Notes:
 
-- The model is still not allowed to define the rendered UI directly.
-- The server owns semantic-to-catalog compilation. The model never emits raw component trees directly.
+- The server owns semantic-to-catalog compilation. The model does not emit raw component trees directly.
 - The live agent path is iterative: it can plan and execute multiple MCP calls before asking for the final semantic view model.
 - Catalog negotiation now follows A2UI practice: the client advertises support, the server selects one compatible catalog, and the chosen `catalogId` is returned in `beginRendering`.
 - Inline catalogs are supported when they declare the renderer roles needed by this app.
@@ -173,13 +174,76 @@ Notes:
 - The renderer registry resolves negotiated component names to local React components and degrades safely when a component type is not implemented locally.
 - If the MCP-assisted live path fails, the service returns an explicit grounded-failure surface and records the failure reason in metadata instead of silently falling back to a model-only answer.
 
+## Grounded Interaction Path
+
+This is the canonical interaction path for the main app. A prompt such as `change my current region` goes through the grounded agent path first, fetches live region options from MCP, renders an interactive selector, and then handles the follow-up `userAction`.
+
+```mermaid
+sequenceDiagram
+    participant Browser as "Browser UI"
+    participant Client as "Client-side app
+    A2UI Workbench + ResponseSurface"
+    participant Route as "Server-side app
+    /api/respond"
+    participant Service as "Server-side app
+    A2UI Orchestrator"
+    participant Agent as "Agent
+    grounded agent loop"
+    participant MCP as "MCP server
+    OCI sidecar"
+    participant LLM as "LLM
+    MCP planner"
+    participant Compile as "Server-side app
+    Catalog Compiler"
+    participant ActionRoute as "Server-side app
+    /api/actions/region-selector"
+
+    Browser->>Route: POST /api/respond { prompt: "change my current region" }
+    Route->>Service: generateA2UIMessageStream(...)
+    Service->>Agent: collect grounded agent context
+    Agent->>LLM: plan grounded MCP usage
+    LLM-->>Agent: choose OCI region retrieval
+    Agent->>MCP: fetch live OCI regions
+    MCP-->>Agent: grounded region catalog
+    Agent-->>Service: grounded tool result
+    Service->>Compile: build and compile grounded selection into A2UI
+    Compile-->>Route: initial A2UI message stream
+    Route-->>Client: `surfaceUpdate` + `dataModelUpdate` + `beginRendering`
+    Client-->>Browser: render grounded selector
+    Browser->>Client: choose region + click submit
+    Client->>ActionRoute: POST userAction with resolved region value
+    ActionRoute-->>Client: delta `dataModelUpdate`
+    Client-->>Browser: update rendered surface in place
+```
+
+Grounded does not mean every interaction has to go back through the model.
+
+- The initial grounded surface can be produced through `server -> agent -> MCP -> compiler`, with the model used for planning when the workflow needs it.
+- Follow-up `userAction` handling can be deterministic server logic when the action contract is already known.
+- That is still idiomatic A2UI: the server owns the UI protocol, the client emits `userAction`, and the server returns updates.
+
 ## What it does
 
 The app accepts a user prompt, sends it to `POST /api/respond`, and renders an
-A2UI surface instead of plain text only. The server route supports two execution modes:
+A2UI surface instead of plain text only.
+
+The main flow supports both kinds of surfaces you want in an A2UI app:
+
+- Static grounded surfaces: prompts such as `list all OCI regions` return reporting-style UI with metrics, status, tables, and actions.
+- Interactive grounded surfaces: prompts such as `change my current region` return bound input controls, then continue through A2UI `userAction` and same-surface delta updates.
+
+The server route supports two execution modes:
 
 - Mock mode: enabled when `A2UI_MODE=mock`, or whenever `OPENAI_API_KEY` is not present outside the compose workflow
 - Live mode: enabled when the app has `OPENAI_API_KEY` and the `oci-mcp` sidecar is reachable
+
+From a system integration and A2UI perspective:
+
+1. `POST /api/respond` is the entrypoint for both static and interactive surfaces.
+2. In live grounded mode, the server uses the agent, MCP, and, when needed, the model to gather or plan the grounded content for the initial surface.
+3. The compiler turns that semantic view model or server-shaped grounded surface into negotiated-catalog A2UI messages for the client runtime.
+4. If the surface is interactive, the client emits `userAction` and the server responds with follow-up A2UI updates for the same surface.
+5. Those follow-up updates do not have to go back through the model when the action contract is already known; deterministic server-side handling is still idiomatic A2UI.
 
 ## Quick Demo Prompts
 
@@ -196,60 +260,8 @@ Use these prompts to exercise the main demo flows quickly.
 Notes:
 
 - The OCI prompts above are grounded flows. They work best when the compose stack is running, `oci-mcp` is healthy, and your OCI auth is current via `oci session auth`.
-- If you want a minimal, protocol-focused interaction demo without the full MCP path, use [/interactive](/Users/rigebha/Workspace/mcp-examples/a2ui/src/app/interactive/page.tsx).
-
-## Interactive Example
-
-The repo also includes a canonical interaction example at `/interactive`.
-
-It demonstrates the A2UI data-flow pattern for user interaction:
-
-1. The server returns an initial A2UI surface with a bound `TextField` and `Button`.
-2. The user types into the field on the client.
-3. Clicking the button emits a `userAction` event with resolved `action.context`.
-4. The server responds with delta `dataModelUpdate` messages for the same surface.
-
-Top-level system boundaries involved in this flow:
-
-- `Client-side app`: the `/interactive` page, `A2UIInteractiveExample`, and `ResponseSurface`
-- `Server-side app`: `POST /api/examples/interactive` and the message builders in `src/lib/a2ui/interactive-example.ts`
-- `Agent`, `LLM`, and `MCP server`: part of the overall app architecture, but bypassed by this minimal interaction example
-
-```mermaid
-sequenceDiagram
-    participant Browser as "Browser UI"
-    participant Client as "Client-side app
-    A2UIInteractiveExample + ResponseSurface"
-    participant Route as "Server-side app
-    /api/examples/interactive"
-    participant Server as "Server-side app
-    interactive-example.ts builders"
-    participant Agent as "Agent
-    grounded agent loop"
-    participant LLM as "LLM
-    planner + semantic view model"
-    participant MCP as "MCP server
-    OCI sidecar or other MCP backend"
-
-    Note over Agent,MCP: Present in the overall system, but not used by /interactive
-
-    Browser->>Route: GET /interactive
-    Route-->>Browser: initial page shell
-    Browser->>Route: POST initial request
-    Route->>Server: build initial A2UI surface
-    Server-->>Route: surfaceUpdate + dataModelUpdate + beginRendering
-    Route-->>Client: initial A2UI message stream
-    Client-->>Browser: render input + button
-    Browser->>Client: type into bound input
-    Browser->>Client: click button
-    Client->>Route: POST userAction with resolved action.context
-    Route->>Server: build delta updates for same surface
-    Server-->>Route: dataModelUpdate delta
-    Route-->>Client: delta A2UI message stream
-    Client-->>Browser: update rendered surface in place
-```
-
-Use it to inspect the minimal round-trip for interactive A2UI without the full MCP-backed prompt flow.
+- `list all OCI regions` and `change my current region` both use the same main app path. The difference is in the surface the server compiles: reporting/table for the first, selection plus `userAction` follow-up for the second.
+- `change my current region` is the primary interactive demo for the main app and the canonical example of grounded A2UI interaction in this repo.
 
 ## Run
 
@@ -365,7 +377,7 @@ Runtime secret handling:
 
 - `compose.yaml` expects the external Podman secret named `openai_api_key`.
 - The container entrypoint reads `/run/secrets/openai_api_key` and exports it for the app at startup.
-- Live requests use a 30s OpenAI timeout by default (`A2UI_OPENAI_TIMEOUT_MS`) and a 15s MCP timeout by default (`A2UI_MCP_TIMEOUT_MS`).
+- Live requests use a 2-minute OpenAI timeout by default in the canonical compose flow (`A2UI_OPENAI_TIMEOUT_MS=120000`) and a 15s MCP timeout by default (`A2UI_MCP_TIMEOUT_MS`).
 
 The app loads its non-secret runtime configuration from `config/app-config.toml`, with the checked-in template at `config/app-config.template.toml`.
 

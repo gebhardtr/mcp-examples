@@ -1,14 +1,17 @@
 import { loadAppConfig } from "@/lib/config/app-config";
 import { negotiateCatalog, type A2UIClientCapabilities } from "./catalogs";
 import { renderA2UIViewModel } from "./compiler.ts";
-import { generateAgentA2UIViewModel } from "./agent.ts";
+import {
+  collectGroundedAgentContext,
+  generateAgentA2UIViewModel,
+} from "./agent.ts";
 import { buildGroundedFailureViewModel } from "./grounded-failure.ts";
 import { buildMockViewModel } from "./mock.ts";
 import { normalizeA2UIViewModel } from "./normalize.ts";
 import type { A2UIMessage } from "./protocol.ts";
 import {
-  buildRegionSelection,
   buildRegionSelectionFailure,
+  buildRegionSelectionViewModel,
   isRegionChangePrompt,
 } from "./region-selector.ts";
 
@@ -29,24 +32,27 @@ export async function generateA2UIMessageStream(
   const appConfig = await loadAppConfig();
 
   try {
-    const result = await generateAgentA2UIViewModel(prompt, appConfig);
-    const normalized = normalizeA2UIViewModel(result.data, "openai", result.model);
-
     if (isRegionChangePrompt(prompt)) {
-      const selection = buildRegionSelection(result.toolExecution);
+      const groundedContext = await collectGroundedAgentContext(prompt, appConfig);
+      const regionSelectionViewModel = buildRegionSelectionViewModel(
+        groundedContext.toolExecution,
+      );
 
-      if (!selection) {
+      if (!regionSelectionViewModel) {
         return renderA2UIViewModel(
           buildGroundedFailureViewModel(
             prompt,
-            buildRegionSelectionFailure(result.toolExecution),
+            buildRegionSelectionFailure(groundedContext.toolExecution),
           ),
           catalogRuntime,
         );
       }
 
-      normalized.selection = selection;
+      return renderA2UIViewModel(regionSelectionViewModel, catalogRuntime);
     }
+
+    const result = await generateAgentA2UIViewModel(prompt, appConfig);
+    const normalized = normalizeA2UIViewModel(result.data, "openai", result.model);
 
     return renderA2UIViewModel(
       normalized,

@@ -25,16 +25,24 @@ import {
 const DEFAULT_MAX_TOOL_CALLS = 4;
 const DEFAULT_MAX_VIEW_MODEL_ATTEMPTS = 3;
 
-export async function generateAgentA2UIViewModel(
+type AgentGroundingContext = {
+  hasActiveServers: boolean;
+  availableTools: MCPToolDefinition[];
+  serverInstructions: string;
+  toolExecution?: MCPToolExecution;
+};
+
+export async function collectGroundedAgentContext(
   prompt: string,
   appConfig: AppConfig,
-) {
+): Promise<AgentGroundingContext> {
   const serverDefinitions = resolveActiveServers(appConfig);
 
   if (serverDefinitions.length === 0) {
-    const result = await requestA2UIViewModel(prompt, undefined, appConfig);
     return {
-      ...result,
+      hasActiveServers: false,
+      availableTools: [],
+      serverInstructions: "",
       toolExecution: undefined,
     };
   }
@@ -45,13 +53,14 @@ export async function generateAgentA2UIViewModel(
     const discovery = await discoverTools(sessions, availabilityNotes);
     const planningAttempts: MCPPlanningAttempt[] = [];
     let toolExecution: MCPToolExecution | undefined;
+    const serverInstructions = discovery.instructions.join("\n\n");
 
     for (let attempt = 0; attempt < DEFAULT_MAX_TOOL_CALLS; attempt += 1) {
       const plan = await requestMcpToolPlan(
         prompt,
         discovery.tools,
         {
-          serverInstructions: discovery.instructions.join("\n\n"),
+          serverInstructions,
           previousAttempts: planningAttempts,
           maxToolCalls: DEFAULT_MAX_TOOL_CALLS,
         },
@@ -79,50 +88,10 @@ export async function generateAgentA2UIViewModel(
       }
     }
 
-    const serverInstructions = discovery.instructions.join("\n\n");
-    const retryFeedback = buildSemanticRetryFeedback(prompt, toolExecution);
-    let lastResult:
-      | Awaited<ReturnType<typeof requestA2UIViewModel>>
-      | undefined;
-
-    for (
-      let attempt = 0;
-      attempt < DEFAULT_MAX_VIEW_MODEL_ATTEMPTS;
-      attempt += 1
-    ) {
-      const result = await requestA2UIViewModel(
-        prompt,
-        {
-          serverInstructions:
-            attempt > 0 && retryFeedback
-              ? [serverInstructions, retryFeedback].filter(Boolean).join("\n\n")
-              : serverInstructions,
-          toolExecution,
-          availableTools: discovery.tools,
-        },
-        appConfig,
-      );
-
-      lastResult = result;
-
-      if (
-        !shouldRetrySemanticViewModel(
-          prompt,
-          toolExecution,
-          result.data,
-          result.model,
-        )
-      ) {
-        break;
-      }
-    }
-
-    if (!lastResult) {
-      throw new Error("The server could not produce a semantic view model.");
-    }
-
     return {
-      ...lastResult,
+      hasActiveServers: true,
+      availableTools: discovery.tools,
+      serverInstructions,
       toolExecution,
     };
   } finally {
@@ -130,6 +99,72 @@ export async function generateAgentA2UIViewModel(
       sessions.map((session) => closeMcpClient(session.client, session.transport)),
     );
   }
+}
+
+export async function generateAgentA2UIViewModel(
+  prompt: string,
+  appConfig: AppConfig,
+) {
+  const groundedContext = await collectGroundedAgentContext(prompt, appConfig);
+
+  if (!groundedContext.hasActiveServers) {
+    const result = await requestA2UIViewModel(prompt, undefined, appConfig);
+    return {
+      ...result,
+      toolExecution: undefined,
+    };
+  }
+
+  const retryFeedback = buildSemanticRetryFeedback(
+    prompt,
+    groundedContext.toolExecution,
+  );
+  let lastResult:
+    | Awaited<ReturnType<typeof requestA2UIViewModel>>
+    | undefined;
+
+  for (
+    let attempt = 0;
+    attempt < DEFAULT_MAX_VIEW_MODEL_ATTEMPTS;
+    attempt += 1
+  ) {
+    const result = await requestA2UIViewModel(
+      prompt,
+      {
+        serverInstructions:
+          attempt > 0 && retryFeedback
+            ? [groundedContext.serverInstructions, retryFeedback]
+                .filter(Boolean)
+                .join("\n\n")
+            : groundedContext.serverInstructions,
+        toolExecution: groundedContext.toolExecution,
+        availableTools: groundedContext.availableTools,
+      },
+      appConfig,
+    );
+
+    lastResult = result;
+
+    if (
+      !shouldRetrySemanticViewModel(
+        prompt,
+        groundedContext.toolExecution,
+        result.data,
+        result.model,
+      )
+    ) {
+      break;
+    }
+  }
+
+  if (!lastResult) {
+    throw new Error("The server could not produce a semantic view model.");
+  }
+
+  return {
+    ...lastResult,
+    toolExecution: groundedContext.toolExecution,
+  };
 }
 
 async function executePlannedTool(
